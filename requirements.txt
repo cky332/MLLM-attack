@@ -1,0 +1,21 @@
+# Hugging Face ecosystem
+transformers>=4.36.0
+peft>=0.7.0
+datasets
+huggingface_hub
+
+# Training framework
+lightning>=2.1.0
+deepspeed>=0.12.0
+
+# NLP metrics
+nltk
+
+# Multiprocessing
+multiprocess
+
+# Flash Attention 2 (requires Ampere+ GPU: A100/A30/RTX 3090/4090)
+flash-attn>=2.3.0
+
+# Experiment tracking (optional, training code has it commented out)
+wandb
