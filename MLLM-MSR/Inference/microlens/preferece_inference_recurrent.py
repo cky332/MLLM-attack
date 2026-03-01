@@ -9,7 +9,7 @@ from torch.cuda.amp import autocast
 import logging
 
 os.environ['CURL_CA_BUNDLE'] = ''
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3,4,5,6,7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
@@ -138,7 +138,7 @@ def gpu_computation(batch, rank):
 
 if __name__ == "__main__":
     set_start_method("spawn")
-    num_proc = 6
+    num_proc = 4
 
     chunk_size = 3000
 

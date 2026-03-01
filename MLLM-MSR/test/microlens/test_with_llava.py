@@ -15,7 +15,7 @@ from peft import PeftModel, PeftConfig
 
 
 os.environ['CURL_CA_BUNDLE'] = ''
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3,4,5,6,7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 
 
 default_dtype = torch.get_default_dtype()
@@ -155,7 +155,7 @@ if __name__ == "__main__":
         batch_size=12,
         with_rank=True,
         # num_proc=torch.cuda.device_count(),  # one process per GPU
-        num_proc=6  # one process per GPU
+        num_proc=4  # one process per GPU
     )
     # updated_dataset.save_to_disk("processed")
     yes_logits = torch.tensor(updated_dataset['yes_logits'])

@@ -9,7 +9,7 @@ import os
 import pandas as pd
 
 os.environ['CURL_CA_BUNDLE'] = ''
-os.environ["CUDA_VISIBLE_DEVICES"]="2,3,4,5,6,7"
+os.environ["CUDA_VISIBLE_DEVICES"]="0,1,2,3"
 
 #model_id  = "lmms-lab/llama3-llava-next-8b"
 model_id = "llava-hf/llava-v1.6-mistral-7b-hf"
