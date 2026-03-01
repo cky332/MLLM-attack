@@ -8,7 +8,7 @@ import pandas as pd
 from torch.cuda.amp import autocast
 
 os.environ['CURL_CA_BUNDLE'] = ''
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3,4,5,6,7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 
 model_id = "meta-llama/Meta-Llama-3-8B-Instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_id, token='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')
@@ -112,7 +112,7 @@ def gpu_computation(batch, rank):
 
 if __name__ == "__main__":
     set_start_method("spawn")
-    num_proc = 6
+    num_proc = 4
 
     # 使用 dataset.map 进行 GPU 推理
     updated_dataset = prompt_dataset.map(
