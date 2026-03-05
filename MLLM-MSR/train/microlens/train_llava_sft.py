@@ -154,25 +154,12 @@ model = get_peft_model(model, lora_config)
 train_dataset = LlavaDataset2("MicroLens-50k-training-recurrent",  split="train", sort_json_key=False)
 val_dataset = LlavaDataset2("MicroLens-50k-training-recurrent", split="validation", sort_json_key=False)
 
-MAX_IMG_LONG_EDGE = 640  # Cap the longest edge to limit GPU memory usage
-
 def resize_image(image_list):
-    # Cap image dimensions to prevent OOM from very large images
-    capped_images = []
-    for img in image_list:
-        long_edge = max(img.width, img.height)
-        if long_edge > MAX_IMG_LONG_EDGE:
-            scale = MAX_IMG_LONG_EDGE / long_edge
-            new_w = int(img.width * scale)
-            new_h = int(img.height * scale)
-            img = img.resize((new_w, new_h))
-        capped_images.append(img)
-
-    max_width = max(img.width for img in capped_images)
-    max_height = max(img.height for img in capped_images)
+    max_width = max(img.width for img in image_list)
+    max_height = max(img.height for img in image_list)
 
     padded_images = []
-    for img in capped_images:
+    for img in image_list:
         if img.width == max_width and img.height == max_height:
             padded_images.append(img)
             continue
