@@ -34,7 +34,7 @@ model = LlavaNextForConditionalGeneration.from_pretrained(base_model_id, cache_d
 
 
 #processor_id  = 'llava-hf/llava-v1.6-mistral-7b-hf'
-processor = LlavaNextProcessor.from_pretrained(base_model_id, return_tensors=torch.float16)
+processor = LlavaNextProcessor.from_pretrained(base_model_id)
 processor.tokenizer.pad_token = processor.tokenizer.eos_token
 #processor.tokenizer.padding_side = "right"
 
