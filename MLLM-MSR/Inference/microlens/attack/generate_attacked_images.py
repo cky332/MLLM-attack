@@ -16,8 +16,8 @@ Usage:
 
 import argparse
 import os
-import textwrap
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageDraw, ImageFont
 
 from attack_config import (
@@ -28,14 +28,30 @@ from attack_config import (
     TEXT_STYLES,
 )
 
+# Cache the loaded font to avoid repeated disk I/O (shared across threads)
+_font_cache = {}
+
 
 def load_font(font_path, size_pixels):
     """Load a TrueType font, falling back to default if not found."""
-    try:
-        return ImageFont.truetype(font_path, size=size_pixels)
-    except (OSError, IOError):
-        print(f"Warning: Cannot load font {font_path}, using default font.")
-        return ImageFont.load_default()
+    cache_key = (font_path, size_pixels)
+    if cache_key in _font_cache:
+        return _font_cache[cache_key]
+
+    if font_path:
+        try:
+            if font_path.lower().endswith(".ttc"):
+                font = ImageFont.truetype(font_path, size=size_pixels, index=0)
+            else:
+                font = ImageFont.truetype(font_path, size=size_pixels)
+            _font_cache[cache_key] = font
+            return font
+        except (OSError, IOError):
+            pass
+
+    font = ImageFont.load_default()
+    _font_cache[cache_key] = font
+    return font
 
 
 def wrap_text_to_width(draw, text, font, max_width):
@@ -165,7 +181,7 @@ def process_images(src_dir, dst_dir, attack_name, max_workers=8):
 
     success_count = 0
     fail_count = 0
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_single_image, t): t for t in tasks}
         for future in as_completed(futures):
             ok, info = future.result()
@@ -188,6 +204,16 @@ def main():
                         help="Comma-separated attack names, or 'all' for all configs")
     parser.add_argument("--workers", type=int, default=8, help="Number of parallel workers")
     args = parser.parse_args()
+
+    # Validate font at startup
+    if not CJK_FONT_PATH:
+        print("FATAL: No usable font found. Aborting.")
+        print("  Please install a CJK font or set CJK_FONT_PATH in attack_config.py")
+        sys.exit(1)
+
+    # Pre-warm font cache with a test load
+    test_font = load_font(CJK_FONT_PATH, 20)
+    print(f"[main] Font loaded OK: {CJK_FONT_PATH} (type={type(test_font).__name__})")
 
     if args.attacks == "all":
         attack_names = list(ATTACK_CONFIGS.keys())
