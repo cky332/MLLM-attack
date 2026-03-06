@@ -14,12 +14,11 @@ Usage:
 
 import argparse
 import os
+import glob
 
 import pandas as pd
 import torch
-from datasets import load_dataset
-from multiprocess import set_start_method
-from PIL import ImageOps
+from PIL import Image, ImageOps
 from torch.amp import autocast
 from transformers import AutoProcessor, LlavaNextForConditionalGeneration
 
@@ -40,27 +39,56 @@ def parse_args():
     parser.add_argument("--model_id", type=str, default="llava-hf/llava-v1.6-mistral-7b-hf",
                         help="HuggingFace model ID")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size per GPU")
-    parser.add_argument("--num_proc", type=int, default=4, help="Number of processes")
     parser.add_argument("--max_new_tokens", type=int, default=200, help="Max new tokens to generate")
-    parser.add_argument("--gpu_ids", type=str, default="0,1,2,3",
-                        help="Comma-separated GPU IDs to use")
+    parser.add_argument("--device", type=str, default="cuda:0",
+                        help="Device to use, e.g. cuda:0")
+    parser.add_argument("--gpu_ids", type=str, default=None,
+                        help="Comma-separated GPU IDs (sets CUDA_VISIBLE_DEVICES)")
     return parser.parse_args()
 
 
-def add_image_file_path(example):
-    """Extract item_id from image filename."""
-    file_path = example["image"].filename
-    filename = os.path.splitext(os.path.basename(file_path))[0]
-    example["item_id"] = filename
-    return example
+def collect_images(img_dir):
+    """Collect all image file paths and their item_ids."""
+    extensions = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp")
+    paths = []
+    for ext in extensions:
+        paths.extend(glob.glob(os.path.join(img_dir, ext)))
+        paths.extend(glob.glob(os.path.join(img_dir, ext.upper())))
+    paths = sorted(set(paths))
+    item_ids = [os.path.splitext(os.path.basename(p))[0] for p in paths]
+    return paths, item_ids
+
+
+def pad_batch_images(images):
+    """Pad images to the same size within a batch (same logic as image_summary.py)."""
+    max_width = max(img.width for img in images)
+    max_height = max(img.height for img in images)
+
+    padded = []
+    for img in images:
+        if img.width == max_width and img.height == max_height:
+            padded.append(img)
+        else:
+            delta_w = max_width - img.width
+            delta_h = max_height - img.height
+            padding = (
+                delta_w // 2,
+                delta_h // 2,
+                delta_w - (delta_w // 2),
+                delta_h - (delta_h // 2),
+            )
+            padded.append(ImageOps.expand(img, border=padding, fill="black"))
+    return padded
 
 
 def main():
     args = parse_args()
 
+    if args.gpu_ids is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
     os.environ["CURL_CA_BUNDLE"] = ""
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
 
+    # Load model
     print(f"Loading model: {args.model_id}")
     model = LlavaNextForConditionalGeneration.from_pretrained(
         args.model_id,
@@ -69,64 +97,63 @@ def main():
         torch_dtype=torch.float16,
     ).eval()
 
-    # Ensure vision tower returns hidden_states (required by get_image_features).
-    # Must set on EVERY config object — model.config.vision_config and
-    # model.vision_tower.config are separate objects in recent transformers.
-    def _enable_hidden_states(m):
-        """Set output_hidden_states=True on the model and all sub-configs."""
-        m.config.output_hidden_states = True
-        if hasattr(m.config, "vision_config"):
-            m.config.vision_config.output_hidden_states = True
-        if hasattr(m.config, "text_config"):
-            m.config.text_config.output_hidden_states = True
-        if hasattr(m, "vision_tower"):
-            m.vision_tower.config.output_hidden_states = True
-            if hasattr(m.vision_tower, "vision_model"):
-                m.vision_tower.vision_model.config.output_hidden_states = True
+    # Ensure vision tower returns hidden_states (required by newer transformers).
+    # model.config.vision_config and model.vision_tower.config are separate objects.
+    for cfg in [model.config]:
+        cfg.output_hidden_states = True
+        if hasattr(cfg, "vision_config"):
+            cfg.vision_config.output_hidden_states = True
+        if hasattr(cfg, "text_config"):
+            cfg.text_config.output_hidden_states = True
+    if hasattr(model, "vision_tower"):
+        model.vision_tower.config.output_hidden_states = True
+        if hasattr(model.vision_tower, "vision_model"):
+            model.vision_tower.vision_model.config.output_hidden_states = True
 
-    _enable_hidden_states(model)
+    device = args.device
+    model.to(device)
+    print(f"Model loaded on {device}")
 
     processor = AutoProcessor.from_pretrained(args.model_id, return_tensors="pt")
 
+    # Collect images
     print(f"Loading images from: {args.img_dir}")
-    dataset = load_dataset("imagefolder", data_dir=args.img_dir)
-    dataset = dataset.map(lambda x: add_image_file_path(x))
-    print(dataset)
+    image_paths, item_ids = collect_images(args.img_dir)
+    print(f"Found {len(image_paths)} images")
 
-    def gpu_computation(batch, rank):
-        device = f"cuda:{(rank or 0) % torch.cuda.device_count()}"
-        model.to(device)
+    if len(image_paths) == 0:
+        print("No images found. Exiting.")
+        return
 
-        # Re-apply hidden_states config in each worker process (survives spawn/pickle)
-        _enable_hidden_states(model)
+    # Process in batches
+    all_summaries = []
+    all_item_ids = []
+    total = len(image_paths)
 
-        batch_images = batch["image"]
+    for batch_start in range(0, total, args.batch_size):
+        batch_end = min(batch_start + args.batch_size, total)
+        batch_paths = image_paths[batch_start:batch_end]
+        batch_ids = item_ids[batch_start:batch_end]
 
-        # Pad images to same size within batch (same logic as image_summary.py)
-        max_width = max(img.width for img in batch_images)
-        max_height = max(img.height for img in batch_images)
+        # Load and pad images
+        batch_images = []
+        valid_ids = []
+        for path, iid in zip(batch_paths, batch_ids):
+            try:
+                img = Image.open(path).convert("RGB")
+                batch_images.append(img)
+                valid_ids.append(iid)
+            except Exception as e:
+                print(f"  SKIP {path}: {e}")
 
-        padded_images = []
-        for img in batch_images:
-            if img.width == max_width and img.height == max_height:
-                padded_images.append(img)
-            else:
-                delta_width = max_width - img.width
-                delta_height = max_height - img.height
-                padding = (
-                    delta_width // 2,
-                    delta_height // 2,
-                    delta_width - (delta_width // 2),
-                    delta_height - (delta_height // 2),
-                )
-                new_img = ImageOps.expand(img, border=padding, fill="black")
-                padded_images.append(new_img)
+        if not batch_images:
+            continue
 
-        batch["image"] = padded_images
+        padded_images = pad_batch_images(batch_images)
 
         model_inputs = processor(
-            text=[PROMPT] * len(batch["image"]),
-            images=batch["image"],
+            text=[PROMPT] * len(padded_images),
+            images=padded_images,
             return_tensors="pt",
             padding=True,
         ).to(device)
@@ -134,25 +161,17 @@ def main():
         with torch.no_grad(), autocast("cuda"):
             outputs = model.generate(**model_inputs, max_new_tokens=args.max_new_tokens)
 
-        ans = processor.batch_decode(outputs, skip_special_tokens=True)
-        ans = [a.split("[/INST]")[1] for a in ans]
-        return {"summary": ans}
+        decoded = processor.batch_decode(outputs, skip_special_tokens=True)
+        summaries = [d.split("[/INST]")[-1].strip() for d in decoded]
 
-    set_start_method("spawn", force=True)
-    updated_dataset = dataset.map(
-        gpu_computation,
-        batched=True,
-        batch_size=args.batch_size,
-        with_rank=True,
-        num_proc=args.num_proc,
-    )
+        all_summaries.extend(summaries)
+        all_item_ids.extend(valid_ids)
 
-    train_dataset = updated_dataset["train"]
-    df = pd.DataFrame({
-        "item_id": train_dataset["item_id"],
-        "summary": train_dataset["summary"],
-    })
+        if (batch_start // args.batch_size + 1) % 50 == 0 or batch_end == total:
+            print(f"  Progress: {batch_end}/{total}")
 
+    # Save results
+    df = pd.DataFrame({"item_id": all_item_ids, "summary": all_summaries})
     os.makedirs(os.path.dirname(args.output_csv) or ".", exist_ok=True)
     df.to_csv(args.output_csv, index=False)
     print(f"Saved {len(df)} summaries to {args.output_csv}")
