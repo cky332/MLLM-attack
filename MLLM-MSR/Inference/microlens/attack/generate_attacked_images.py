@@ -16,7 +16,7 @@ Usage:
 
 import argparse
 import os
-import textwrap
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from PIL import Image, ImageDraw, ImageFont
 
@@ -28,14 +28,35 @@ from attack_config import (
     TEXT_STYLES,
 )
 
+# Cache the loaded font to avoid repeated disk I/O
+_font_cache = {}
+_font_warned = False
+
 
 def load_font(font_path, size_pixels):
     """Load a TrueType font, falling back to default if not found."""
-    try:
-        return ImageFont.truetype(font_path, size=size_pixels)
-    except (OSError, IOError):
-        print(f"Warning: Cannot load font {font_path}, using default font.")
-        return ImageFont.load_default()
+    global _font_warned
+    cache_key = (font_path, size_pixels)
+    if cache_key in _font_cache:
+        return _font_cache[cache_key]
+
+    if font_path:
+        try:
+            font = ImageFont.truetype(font_path, size=size_pixels)
+            _font_cache[cache_key] = font
+            return font
+        except (OSError, IOError):
+            pass
+
+    if not _font_warned:
+        print(f"WARNING: Cannot load font '{font_path}'. Using default font.")
+        print("  Chinese characters will NOT render correctly!")
+        print("  Fix: sudo apt install fonts-wqy-zenhei")
+        _font_warned = True
+
+    font = ImageFont.load_default()
+    _font_cache[cache_key] = font
+    return font
 
 
 def wrap_text_to_width(draw, text, font, max_width):

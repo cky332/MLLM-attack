@@ -3,8 +3,47 @@ Attack configuration for prompt injection experiments on MLLM image summarizatio
 Defines attack texts, text positions, and visual styles.
 """
 
-# CJK font path (WenQuanYi Zen Hei, available on the system)
-CJK_FONT_PATH = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
+import glob
+import os
+
+
+def _find_cjk_font():
+    """Auto-detect a CJK-capable font on the system."""
+    search_patterns = [
+        # Common Linux font paths
+        "/usr/share/fonts/**/wqy*.ttc",
+        "/usr/share/fonts/**/wqy*.ttf",
+        "/usr/share/fonts/**/NotoSansCJK*.ttc",
+        "/usr/share/fonts/**/NotoSansCJK*.otf",
+        "/usr/share/fonts/**/NotoSansSC*.ttf",
+        "/usr/share/fonts/**/SimHei*.ttf",
+        "/usr/share/fonts/**/SimSun*.ttf",
+        "/usr/share/fonts/**/DroidSansFallback*.ttf",
+        "/usr/share/fonts/**/*CJK*.ttc",
+        "/usr/share/fonts/**/*CJK*.ttf",
+        # User-local fonts
+        os.path.expanduser("~/.local/share/fonts/**/*.ttf"),
+        os.path.expanduser("~/.fonts/**/*.ttf"),
+        # Conda environment fonts
+        os.path.join(os.environ.get("CONDA_PREFIX", ""), "lib/python*/site-packages/matplotlib/mpl-data/fonts/ttf/*.ttf"),
+        # Any TTF/TTC as last resort
+        "/usr/share/fonts/**/*.ttf",
+        "/usr/share/fonts/**/*.ttc",
+    ]
+    for pattern in search_patterns:
+        matches = glob.glob(pattern, recursive=True)
+        if matches:
+            return matches[0]
+    return None
+
+
+CJK_FONT_PATH = _find_cjk_font()
+if CJK_FONT_PATH:
+    print(f"[attack_config] Found font: {CJK_FONT_PATH}")
+else:
+    print("[attack_config] WARNING: No CJK font found! Chinese text will not render correctly.")
+    print("  Fix: pip install fonttools && sudo apt install fonts-wqy-zenhei")
+    print("  Or download a .ttf font and set CJK_FONT_PATH manually.")
 
 # Attack text definitions
 ATTACK_TEXTS = {
