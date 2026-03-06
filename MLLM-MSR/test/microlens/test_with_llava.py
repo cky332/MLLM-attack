@@ -32,7 +32,7 @@ torch.set_default_dtype(default_dtype)
 model.tie_weights()
 
 
-dataset = load_from_disk("MicroLens-50k-test")
+dataset = load_from_disk("/home/chenkuiyun/MLLM/MicroLens-50k-test")
 dataset = dataset.select(range(2100))
 print(dataset)
 

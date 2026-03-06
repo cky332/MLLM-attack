@@ -71,4 +71,4 @@ dataset = dataset.cast_column("image", Image())
 
 # 检查数据集结构
 print(dataset)
-dataset.save_to_disk("MicroLens-50k-train-recurrent")
+dataset.save_to_disk(os.path.join(DATA_ROOT, "MicroLens-50k-test"))
