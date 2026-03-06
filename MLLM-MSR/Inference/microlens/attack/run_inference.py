@@ -69,11 +69,22 @@ def main():
         torch_dtype=torch.float16,
     ).eval()
 
-    # Must set on model.config so the vision tower returns hidden_states
-    # (passing via from_pretrained kwargs gets misrouted to generation_config)
-    model.config.output_hidden_states = True
-    if hasattr(model.config, "vision_config"):
-        model.config.vision_config.output_hidden_states = True
+    # Ensure vision tower returns hidden_states (required by get_image_features).
+    # Must set on EVERY config object — model.config.vision_config and
+    # model.vision_tower.config are separate objects in recent transformers.
+    def _enable_hidden_states(m):
+        """Set output_hidden_states=True on the model and all sub-configs."""
+        m.config.output_hidden_states = True
+        if hasattr(m.config, "vision_config"):
+            m.config.vision_config.output_hidden_states = True
+        if hasattr(m.config, "text_config"):
+            m.config.text_config.output_hidden_states = True
+        if hasattr(m, "vision_tower"):
+            m.vision_tower.config.output_hidden_states = True
+            if hasattr(m.vision_tower, "vision_model"):
+                m.vision_tower.vision_model.config.output_hidden_states = True
+
+    _enable_hidden_states(model)
 
     processor = AutoProcessor.from_pretrained(args.model_id, return_tensors="pt")
 
@@ -85,6 +96,9 @@ def main():
     def gpu_computation(batch, rank):
         device = f"cuda:{(rank or 0) % torch.cuda.device_count()}"
         model.to(device)
+
+        # Re-apply hidden_states config in each worker process (survives spawn/pickle)
+        _enable_hidden_states(model)
 
         batch_images = batch["image"]
 
