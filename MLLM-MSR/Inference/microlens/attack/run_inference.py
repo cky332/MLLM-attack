@@ -20,7 +20,7 @@ import torch
 from datasets import load_dataset
 from multiprocess import set_start_method
 from PIL import ImageOps
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 from transformers import AutoProcessor, LlavaNextForConditionalGeneration
 
 # Prompt must match the original image_summary.py exactly for comparable results
@@ -67,6 +67,7 @@ def main():
         cache_dir=os.path.expanduser("~/.cache/huggingface/hub"),
         attn_implementation="flash_attention_2",
         torch_dtype=torch.float16,
+        output_hidden_states=True,
     ).eval()
 
     processor = AutoProcessor.from_pretrained(args.model_id, return_tensors="pt")
@@ -111,7 +112,7 @@ def main():
             padding=True,
         ).to(device)
 
-        with torch.no_grad() and autocast():
+        with torch.no_grad(), autocast("cuda"):
             outputs = model.generate(**model_inputs, max_new_tokens=args.max_new_tokens)
 
         ans = processor.batch_decode(outputs, skip_special_tokens=True)
