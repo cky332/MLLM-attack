@@ -6,9 +6,24 @@ Defines attack texts, text positions, and visual styles.
 import glob
 import os
 
+from PIL import ImageFont
+
+
+def _try_load_font(path, size=20):
+    """Try to load a font file with PIL. Returns True if it works."""
+    try:
+        # For .ttc files, try with index=0 explicitly
+        if path.lower().endswith(".ttc"):
+            ImageFont.truetype(path, size=size, index=0)
+        else:
+            ImageFont.truetype(path, size=size)
+        return True
+    except Exception:
+        return False
+
 
 def _find_cjk_font():
-    """Auto-detect a CJK-capable font on the system."""
+    """Auto-detect a CJK-capable font on the system that PIL can actually load."""
     search_patterns = [
         # Common Linux font paths
         "/usr/share/fonts/**/wqy*.ttc",
@@ -23,27 +38,33 @@ def _find_cjk_font():
         "/usr/share/fonts/**/*CJK*.ttf",
         # User-local fonts
         os.path.expanduser("~/.local/share/fonts/**/*.ttf"),
+        os.path.expanduser("~/.local/share/fonts/**/*.ttc"),
         os.path.expanduser("~/.fonts/**/*.ttf"),
-        # Conda environment fonts
+        # Conda/pip installed fonts (e.g., matplotlib)
         os.path.join(os.environ.get("CONDA_PREFIX", ""), "lib/python*/site-packages/matplotlib/mpl-data/fonts/ttf/*.ttf"),
         # Any TTF/TTC as last resort
         "/usr/share/fonts/**/*.ttf",
         "/usr/share/fonts/**/*.ttc",
     ]
     for pattern in search_patterns:
-        matches = glob.glob(pattern, recursive=True)
-        if matches:
-            return matches[0]
+        matches = sorted(glob.glob(pattern, recursive=True))
+        for match in matches:
+            if _try_load_font(match):
+                return match
+            else:
+                print(f"[attack_config] Font file found but PIL cannot load: {match}")
     return None
 
 
 CJK_FONT_PATH = _find_cjk_font()
 if CJK_FONT_PATH:
-    print(f"[attack_config] Found font: {CJK_FONT_PATH}")
+    print(f"[attack_config] Using font: {CJK_FONT_PATH}")
 else:
-    print("[attack_config] WARNING: No CJK font found! Chinese text will not render correctly.")
-    print("  Fix: pip install fonttools && sudo apt install fonts-wqy-zenhei")
-    print("  Or download a .ttf font and set CJK_FONT_PATH manually.")
+    print("[attack_config] ERROR: No loadable font found!")
+    print("  Chinese text will NOT render correctly.")
+    print("  Fix option 1: pip install Pillow --upgrade  (upgrade Pillow for .ttc support)")
+    print("  Fix option 2: Download a .ttf font to ~/.local/share/fonts/")
+    print("    e.g.: wget -P ~/.local/share/fonts/ https://github.com/googlefonts/noto-cjk/raw/main/Sans/Variable/TTF/NotoSansCJKsc-VF.ttf")
 
 # Attack text definitions
 ATTACK_TEXTS = {
