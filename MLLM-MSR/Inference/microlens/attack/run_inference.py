@@ -67,8 +67,13 @@ def main():
         cache_dir=os.path.expanduser("~/.cache/huggingface/hub"),
         attn_implementation="flash_attention_2",
         torch_dtype=torch.float16,
-        output_hidden_states=True,
     ).eval()
+
+    # Must set on model.config so the vision tower returns hidden_states
+    # (passing via from_pretrained kwargs gets misrouted to generation_config)
+    model.config.output_hidden_states = True
+    if hasattr(model.config, "vision_config"):
+        model.config.vision_config.output_hidden_states = True
 
     processor = AutoProcessor.from_pretrained(args.model_id, return_tensors="pt")
 
