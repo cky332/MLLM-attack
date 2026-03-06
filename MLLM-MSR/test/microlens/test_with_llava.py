@@ -23,7 +23,7 @@ torch.set_default_dtype(torch.float16)
 model_id = "llava-hf/llava-v1.6-mistral-7b-hf"
 #model_id = "/data1/share/LLaVA/llava-v1.6-mistral-7b-hf-lora"
 #model_id = "/data1/share/LLaVA/llava-v1.6-mistral-7b-lora-r32-alpha256_overfit"
-model = LlavaNextForConditionalGeneration.from_pretrained(model_id, cache_dir='/data1/share/.HF_cache/',
+model = LlavaNextForConditionalGeneration.from_pretrained(model_id, cache_dir=os.path.expanduser('~/.cache/huggingface/hub'),
                                                           attn_implementation="flash_attention_2",
                                                           torch_dtype=torch.float16,
                                                           #device_map="auto"

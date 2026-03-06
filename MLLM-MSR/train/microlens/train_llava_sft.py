@@ -113,7 +113,7 @@ else:
     # only available on certain devices, see https://github.com/Dao-AILab/flash-attention?tab=readme-ov-file#installation-and-features
     model = LlavaNextForConditionalGeneration.from_pretrained(
         MODEL_ID,
-        cache_dir='/data1/share/.HF_cache/',
+        cache_dir=os.path.expanduser('~/.cache/huggingface/hub'),
         torch_dtype=torch.float16,
         _attn_implementation="flash_attention_2",
     )

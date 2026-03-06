@@ -21,10 +21,10 @@ base_model_id = "llava-hf/llava-v1.6-mistral-7b-hf"
 #peft_model_id = "/data1/share/LLaVA/llava-v1.6-mistral-7b-hf-lora"
 #peft_model_id = "/data1/share/LLaVA/llava-v1.6-mistral-7b-hf-lora-distributed"
 #peft_model_id = "/data1/share/LLaVA/llava-v1.6-mistral-7b-hf-lora-dist-e12-r16"
-peft_model_id = "/data1/share/LLaVA/llava-v1.6-mistral-7b-hf-lora-dist-e8-r32"
-#peft_model_id = "/data1/share/LLaVA/llava-v1.6-mistral-7b-hf-lora-recurrent-e4-r16"
+#peft_model_id = "/data1/share/LLaVA/llava-v1.6-mistral-7b-hf-lora-dist-e8-r32"
+peft_model_id = "/home/chenkuiyun/MLLM/output/llava-v1.6-mistral-7b-hf-lora-recurrent-e4-r16"
 config = PeftConfig.from_pretrained(peft_model_id)
-model = LlavaNextForConditionalGeneration.from_pretrained(base_model_id, cache_dir='/data1/share/.HF_cache/',
+model = LlavaNextForConditionalGeneration.from_pretrained(base_model_id, cache_dir=os.path.expanduser('~/.cache/huggingface/hub'),
                                                           attn_implementation="flash_attention_2",
                                                           torch_dtype=torch.float16,
                                                           #quantization_config=bnb_config
