@@ -38,7 +38,7 @@ print(dataset)
 
 processor_id  = 'llava-hf/llava-v1.6-mistral-7b-hf'
 #processor_id = '/data1/share/LLaVA/llava-v1.6-mistral-7b-hf-lora'
-processor = LlavaNextProcessor.from_pretrained(processor_id, return_tensors=torch.float16)
+processor = LlavaNextProcessor.from_pretrained(processor_id)
 processor.tokenizer.pad_token = processor.tokenizer.eos_token
 
 
