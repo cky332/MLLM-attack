@@ -15,7 +15,7 @@ from peft import PeftModel, PeftConfig
 
 
 os.environ['CURL_CA_BUNDLE'] = ''
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+# CUDA_VISIBLE_DEVICES should be set from command line, not hardcoded
 
 base_model_id = "llava-hf/llava-v1.6-mistral-7b-hf"
 #peft_model_id = "/data1/share/LLaVA/llava-v1.6-mistral-7b-hf-lora"
@@ -151,13 +151,13 @@ def ndcg_at_k(y_true, y_prob, k):
 if __name__ == "__main__":
     set_start_method("spawn")
     torch.cuda.empty_cache()
+    num_gpus = torch.cuda.device_count()
     updated_dataset = dataset.map(
         gpu_computation,
         batched=True,
-        batch_size=6,
+        batch_size=4,
         with_rank=True,
-        # num_proc=torch.cuda.device_count(),  # one process per GPU
-        num_proc=4  # one process per GPU
+        num_proc=num_gpus,
     )
     updated_dataset = updated_dataset.sort("user")
     yes_logits = torch.tensor(updated_dataset['yes_logits'])
