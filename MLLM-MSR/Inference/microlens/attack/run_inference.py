@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument("--output_csv", type=str, required=True, help="Output CSV path")
     parser.add_argument("--model_id", type=str, default="llava-hf/llava-v1.6-mistral-7b-hf",
                         help="HuggingFace model ID")
-    parser.add_argument("--batch_size", type=int, default=8, help="Batch size per GPU")
+    parser.add_argument("--batch_size", type=int, default=2, help="Batch size per GPU")
     parser.add_argument("--max_new_tokens", type=int, default=200, help="Max new tokens to generate")
     parser.add_argument("--device", type=str, default="cuda:0",
                         help="Device to use, e.g. cuda:0")
@@ -90,11 +90,24 @@ def main():
 
     # Load model
     print(f"Loading model: {args.model_id}")
-    model = LlavaNextForConditionalGeneration.from_pretrained(
-        args.model_id,
+
+    # Detect number of visible GPUs for automatic multi-GPU support
+    num_gpus = torch.cuda.device_count()
+    print(f"Detected {num_gpus} GPU(s)")
+
+    load_kwargs = dict(
         cache_dir=os.path.expanduser("~/.cache/huggingface/hub"),
         attn_implementation="flash_attention_2",
         torch_dtype=torch.float16,
+    )
+
+    if num_gpus > 1:
+        # Spread model across multiple GPUs automatically
+        load_kwargs["device_map"] = "auto"
+        print("Using device_map='auto' for multi-GPU inference")
+
+    model = LlavaNextForConditionalGeneration.from_pretrained(
+        args.model_id, **load_kwargs
     ).eval()
 
     # Ensure vision tower returns hidden_states (required by newer transformers).
@@ -110,9 +123,13 @@ def main():
         if hasattr(model.vision_tower, "vision_model"):
             model.vision_tower.vision_model.config.output_hidden_states = True
 
-    device = args.device
-    model.to(device)
-    print(f"Model loaded on {device}")
+    if num_gpus <= 1:
+        device = args.device
+        model.to(device)
+    else:
+        # With device_map="auto", model is already distributed; use first device for inputs
+        device = args.device
+    print(f"Model loaded, input device: {device}")
 
     processor = AutoProcessor.from_pretrained(args.model_id, return_tensors="pt")
 
@@ -166,6 +183,10 @@ def main():
 
         all_summaries.extend(summaries)
         all_item_ids.extend(valid_ids)
+
+        # Free GPU memory between batches
+        del model_inputs, outputs, decoded
+        torch.cuda.empty_cache()
 
         if (batch_start // args.batch_size + 1) % 50 == 0 or batch_end == total:
             print(f"  Progress: {batch_end}/{total}")
