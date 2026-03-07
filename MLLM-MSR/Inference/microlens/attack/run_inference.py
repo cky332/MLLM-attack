@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument("--output_csv", type=str, required=True, help="Output CSV path")
     parser.add_argument("--model_id", type=str, default="llava-hf/llava-v1.6-mistral-7b-hf",
                         help="HuggingFace model ID")
-    parser.add_argument("--batch_size", type=int, default=2, help="Batch size per GPU")
+    parser.add_argument("--batch_size", type=int, default=4, help="Batch size per GPU")
     parser.add_argument("--max_new_tokens", type=int, default=200, help="Max new tokens to generate")
     parser.add_argument("--device", type=str, default="cuda:0",
                         help="Device to use, e.g. cuda:0")
