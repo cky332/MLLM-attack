@@ -17,7 +17,7 @@ Usage:
 import argparse
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from PIL import Image, ImageDraw, ImageFont
 
 from attack_config import (
@@ -28,12 +28,13 @@ from attack_config import (
     TEXT_STYLES,
 )
 
-# Cache the loaded font to avoid repeated disk I/O (shared across threads)
+# Per-process font cache (works with both threads and processes via fork)
 _font_cache = {}
 
 
 def load_font(font_path, size_pixels):
-    """Load a TrueType font, falling back to default if not found."""
+    """Load a TrueType font, falling back to default if not found.
+    Uses a per-process cache so repeated calls within the same worker are fast."""
     cache_key = (font_path, size_pixels)
     if cache_key in _font_cache:
         return _font_cache[cache_key]
@@ -181,7 +182,7 @@ def process_images(src_dir, dst_dir, attack_name, max_workers=8):
 
     success_count = 0
     fail_count = 0
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_single_image, t): t for t in tasks}
         for future in as_completed(futures):
             ok, info = future.result()
