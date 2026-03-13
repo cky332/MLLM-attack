@@ -18,7 +18,7 @@ from collections import Counter
 
 import pandas as pd
 
-from attack_config import POSITIVE_KEYWORDS
+from attack_config import NEGATIVE_KEYWORDS, POSITIVE_KEYWORDS
 
 
 def load_and_merge(clean_csv, attacked_csv):
@@ -75,8 +75,8 @@ def verbatim_detection(merged_df, attack_text):
 
 
 def keyword_frequency_analysis(merged_df):
-    """Count positive/promotional keywords in clean vs attacked summaries."""
-    results = {}
+    """Count positive and negative keywords in clean vs attacked summaries."""
+    results = {"positive": {}, "negative": {}}
 
     for keyword in POSITIVE_KEYWORDS:
         kw_lower = keyword.lower()
@@ -89,7 +89,24 @@ def keyword_frequency_analysis(merged_df):
             if kw_lower in s.lower()
         )
         if count_clean > 0 or count_attacked > 0:
-            results[keyword] = {
+            results["positive"][keyword] = {
+                "clean": count_clean,
+                "attacked": count_attacked,
+                "diff": count_attacked - count_clean,
+            }
+
+    for keyword in NEGATIVE_KEYWORDS:
+        kw_lower = keyword.lower()
+        count_clean = sum(
+            1 for s in merged_df["summary_clean"].astype(str)
+            if kw_lower in s.lower()
+        )
+        count_attacked = sum(
+            1 for s in merged_df["summary_attacked"].astype(str)
+            if kw_lower in s.lower()
+        )
+        if count_clean > 0 or count_attacked > 0:
+            results["negative"][keyword] = {
                 "clean": count_clean,
                 "attacked": count_attacked,
                 "diff": count_attacked - count_clean,
@@ -213,9 +230,14 @@ def generate_report(clean_csv, attacked_csv, attack_text, output_path):
     kf = report["keyword_frequency"]
     if kf:
         print(f"[Keyword Frequency Changes]")
-        for kw, counts in kf.items():
-            if counts["diff"] != 0:
-                print(f"  '{kw}': clean={counts['clean']}, attacked={counts['attacked']} (diff={counts['diff']:+d})")
+        for category in ["positive", "negative"]:
+            cat_data = kf.get(category, kf) if isinstance(kf, dict) and category in kf else {}
+            if not cat_data:
+                continue
+            print(f"  {category.upper()} keywords:")
+            for kw, counts in cat_data.items():
+                if counts["diff"] != 0:
+                    print(f"    '{kw}': clean={counts['clean']}, attacked={counts['attacked']} (diff={counts['diff']:+d})")
     print()
 
     la = report["length_analysis"]
