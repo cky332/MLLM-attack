@@ -17,7 +17,7 @@ Usage:
 import argparse
 import os
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageDraw, ImageFont
 
 from attack_config import (
@@ -182,7 +182,7 @@ def process_images(src_dir, dst_dir, attack_name, max_workers=8):
 
     success_count = 0
     fail_count = 0
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_single_image, t): t for t in tasks}
         for future in as_completed(futures):
             ok, info = future.result()
