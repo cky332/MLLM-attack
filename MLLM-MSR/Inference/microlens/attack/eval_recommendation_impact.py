@@ -93,8 +93,8 @@ def replace_summaries(clean_csv, attacked_csv, output_csv):
 # Step 2: Run user preference inference with replaced summaries
 # ---------------------------------------------------------------------------
 def run_preference_inference(visual_csv, title_csv, user_items_tsv, output_csv,
-                             model_id="meta-llama/Meta-Llama-3-8B-Instruct",
-                             num_proc=4, batch_size=12):
+                             model_id="/home/chenkuiyun/.cache/modelscope/LLM-Research/Meta-Llama-3-8B-Instruct",
+                             num_proc=1, batch_size=12):
     """Re-run user preference inference using attacked visual descriptions.
 
     This replicates the logic from preferece_inference_direct.py but with
@@ -182,8 +182,9 @@ def run_preference_inference(visual_csv, title_csv, user_items_tsv, output_csv,
         )
         return outputs[0]["generated_text"][len(formatted):]
 
-    def gpu_computation(batch, rank):
-        device = f"cuda:{rank % torch.cuda.device_count()}"
+    def gpu_computation(batch):
+        rank = 0
+        device = "cuda:0"
         if rank not in pipelines:
             pipelines[rank] = transformers.pipeline(
                 "text-generation",
@@ -194,18 +195,10 @@ def run_preference_inference(visual_csv, title_csv, user_items_tsv, output_csv,
         summaries = [infer(prompt, rank) for prompt in batch["prompt"]]
         return {"user": batch["user"], "summary": summaries}
 
-    from multiprocess import set_start_method
-    try:
-        set_start_method("spawn")
-    except RuntimeError:
-        pass  # already set
-
     updated_dataset = prompt_dataset.map(
         gpu_computation,
         batched=True,
         batch_size=batch_size,
-        with_rank=True,
-        num_proc=num_proc,
     )
 
     df = pd.DataFrame({
@@ -431,7 +424,7 @@ def main():
     p_pref.add_argument("--title_csv", required=True)
     p_pref.add_argument("--user_items_tsv", required=True)
     p_pref.add_argument("--output_csv", required=True)
-    p_pref.add_argument("--num_proc", type=int, default=4)
+    p_pref.add_argument("--num_proc", type=int, default=1)
     p_pref.add_argument("--batch_size", type=int, default=12)
 
     # compare_metrics
@@ -453,7 +446,7 @@ def main():
     p_all.add_argument("--output_dir", default="results")
     p_all.add_argument("--skip_preference", action="store_true",
                        help="Skip preference inference (use existing file)")
-    p_all.add_argument("--num_proc", type=int, default=4)
+    p_all.add_argument("--num_proc", type=int, default=1)
     p_all.add_argument("--batch_size", type=int, default=12)
 
     args = parser.parse_args()
