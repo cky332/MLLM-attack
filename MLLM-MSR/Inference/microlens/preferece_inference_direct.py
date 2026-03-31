@@ -99,9 +99,9 @@ def infer(prompt, rank):
     )
     return outputs[0]["generated_text"][len(prompt):]
 
-def gpu_computation(batch, rank):
-    device = f"cuda:{rank % torch.cuda.device_count()}"
-    # model.to(device)
+def gpu_computation(batch):
+    rank = 0
+    device = "cuda:0"
     if rank not in pipelines:
         pipelines[rank] = transformers.pipeline(
             "text-generation",
@@ -114,16 +114,11 @@ def gpu_computation(batch, rank):
 
 
 if __name__ == "__main__":
-    set_start_method("spawn")
-    num_proc = 1
-
-    # 使用 dataset.map 进行 GPU 推理
+    # 单 GPU 推理，不使用多进程
     updated_dataset = prompt_dataset.map(
         gpu_computation,
         batched=True,
         batch_size=12,
-        with_rank=True,
-        num_proc=num_proc
     )
 
     user_id = updated_dataset['user']
