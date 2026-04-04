@@ -35,8 +35,12 @@ def load_and_merge(clean_csv, attacked_csv):
     return merged
 
 
-def verbatim_detection(merged_df, attack_text):
-    """Check if the attack text appears verbatim in attacked summaries."""
+def verbatim_detection(merged_df, attack_text, max_samples=5):
+    """Check if the attack text appears verbatim in attacked summaries.
+
+    Also collects sample summaries that contain the full attack text or
+    key fragments, so reviewers can inspect how the injection surfaces.
+    """
     attack_lower = attack_text.lower()
 
     results = {
@@ -51,12 +55,22 @@ def verbatim_detection(merged_df, attack_text):
     fragment_counts_attacked = Counter()
     fragment_counts_clean = Counter()
 
+    # Collect sample summaries containing the injection text
+    full_match_samples = []
+    fragment_match_samples = {frag: [] for frag in attack_fragments}
+
     for _, row in merged_df.iterrows():
         summary_attacked = str(row["summary_attacked"]).lower()
         summary_clean = str(row["summary_clean"]).lower()
 
         if attack_lower in summary_attacked:
             results["full_match_in_attacked"] += 1
+            if len(full_match_samples) < max_samples:
+                full_match_samples.append({
+                    "item_id": int(row["item_id"]),
+                    "summary_attacked": str(row["summary_attacked"])[:500],
+                    "summary_clean": str(row["summary_clean"])[:500],
+                })
         if attack_lower in summary_clean:
             results["full_match_in_clean"] += 1
 
@@ -64,12 +78,21 @@ def verbatim_detection(merged_df, attack_text):
             frag_lower = frag.lower()
             if frag_lower in summary_attacked:
                 fragment_counts_attacked[frag] += 1
+                if len(fragment_match_samples[frag]) < max_samples:
+                    fragment_match_samples[frag].append({
+                        "item_id": int(row["item_id"]),
+                        "summary_attacked": str(row["summary_attacked"])[:500],
+                    })
             if frag_lower in summary_clean:
                 fragment_counts_clean[frag] += 1
 
     results["full_match_rate_attacked"] = results["full_match_in_attacked"] / max(results["total"], 1)
     results["fragment_match_attacked"] = dict(fragment_counts_attacked)
     results["fragment_match_clean"] = dict(fragment_counts_clean)
+    results["full_match_samples"] = full_match_samples
+    results["fragment_match_samples"] = {
+        frag: samples for frag, samples in fragment_match_samples.items() if samples
+    }
 
     return results
 
@@ -217,6 +240,21 @@ def generate_report(clean_csv, attacked_csv, attack_text, output_path):
     print(f"  Full match in attacked summaries: {vd['full_match_in_attacked']}/{vd['total']} "
           f"({vd['full_match_rate_attacked']:.2%})")
     print(f"  Fragment matches in attacked: {vd['fragment_match_attacked']}")
+
+    if vd.get("full_match_samples"):
+        print(f"\n  --- Full Match Samples (up to {len(vd['full_match_samples'])}) ---")
+        for i, sample in enumerate(vd["full_match_samples"], 1):
+            print(f"  [{i}] item_id={sample['item_id']}")
+            print(f"      attacked: {sample['summary_attacked'][:200]}")
+            print(f"      clean:    {sample['summary_clean'][:200]}")
+
+    if vd.get("fragment_match_samples"):
+        print(f"\n  --- Fragment Match Samples ---")
+        for frag, samples in vd["fragment_match_samples"].items():
+            frag_total = vd["fragment_match_attacked"].get(frag, 0)
+            print(f"  Fragment '{frag}' ({frag_total} total matches, showing {len(samples)}):")
+            for i, sample in enumerate(samples, 1):
+                print(f"    [{i}] item_id={sample['item_id']}: {sample['summary_attacked'][:200]}")
     print()
 
     ts = report["text_similarity"]
