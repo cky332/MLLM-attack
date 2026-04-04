@@ -288,15 +288,83 @@ def generate_report(clean_csv, attacked_csv, attack_text, output_path):
     return report
 
 
+def search_verbatim(clean_csv, attacked_csv, attack_text, max_show=20):
+    """Search and display summaries that contain the attack text verbatim.
+
+    Prints the full attacked summary alongside the clean summary for
+    each match, so reviewers can see exactly where the injected text
+    appears.
+    """
+    merged_df = load_and_merge(clean_csv, attacked_csv)
+    attack_lower = attack_text.lower()
+
+    matches = []
+    for _, row in merged_df.iterrows():
+        summary_attacked = str(row["summary_attacked"])
+        if attack_lower in summary_attacked.lower():
+            matches.append({
+                "item_id": row["item_id"],
+                "summary_attacked": summary_attacked,
+                "summary_clean": str(row["summary_clean"]),
+            })
+
+    print(f"\n{'=' * 80}")
+    print(f"VERBATIM MATCH SEARCH: found {len(matches)} / {len(merged_df)} items")
+    print(f"Attack text: {attack_text}")
+    print(f"{'=' * 80}")
+
+    for i, m in enumerate(matches[:max_show], 1):
+        print(f"\n--- [{i}] item_id={m['item_id']} ---")
+        # Highlight where the injection appears
+        atk_idx = m["summary_attacked"].lower().find(attack_lower)
+        atk_len = len(attack_text)
+        summary = m["summary_attacked"]
+        print(f"ATTACKED ({len(summary)} chars, injection starts at char {atk_idx}):")
+        print(summary)
+        print(f"\nCLEAN ({len(m['summary_clean'])} chars):")
+        print(m["summary_clean"])
+        print()
+
+    if len(matches) > max_show:
+        print(f"... and {len(matches) - max_show} more matches (use --max_show to see more)")
+
+    # Print item_id list for all matches
+    print(f"\nAll matched item_ids ({len(matches)}):")
+    print([m["item_id"] for m in matches])
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate prompt injection attack impact")
-    parser.add_argument("--clean_csv", type=str, required=True, help="Clean summaries CSV")
-    parser.add_argument("--attacked_csv", type=str, required=True, help="Attacked summaries CSV")
-    parser.add_argument("--attack_text", type=str, required=True, help="The attack text used")
-    parser.add_argument("--output_report", type=str, required=True, help="Output report JSON path")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # Default: generate report (also works without subcommand for backward compat)
+    report_parser = subparsers.add_parser("report", help="Generate evaluation report")
+    report_parser.add_argument("--clean_csv", type=str, required=True)
+    report_parser.add_argument("--attacked_csv", type=str, required=True)
+    report_parser.add_argument("--attack_text", type=str, required=True)
+    report_parser.add_argument("--output_report", type=str, required=True)
+
+    # Search verbatim matches
+    search_parser = subparsers.add_parser("search", help="Search for verbatim injection matches")
+    search_parser.add_argument("--clean_csv", type=str, required=True)
+    search_parser.add_argument("--attacked_csv", type=str, required=True)
+    search_parser.add_argument("--attack_text", type=str, required=True)
+    search_parser.add_argument("--max_show", type=int, default=20, help="Max samples to display")
+
     args = parser.parse_args()
 
-    generate_report(args.clean_csv, args.attacked_csv, args.attack_text, args.output_report)
+    if args.command == "search":
+        search_verbatim(args.clean_csv, args.attacked_csv, args.attack_text, args.max_show)
+    elif args.command == "report":
+        generate_report(args.clean_csv, args.attacked_csv, args.attack_text, args.output_report)
+    else:
+        # Backward compatibility: no subcommand = report mode
+        parser.add_argument("--clean_csv", type=str, required=True)
+        parser.add_argument("--attacked_csv", type=str, required=True)
+        parser.add_argument("--attack_text", type=str, required=True)
+        parser.add_argument("--output_report", type=str, required=True)
+        args = parser.parse_args()
+        generate_report(args.clean_csv, args.attacked_csv, args.attack_text, args.output_report)
 
 
 if __name__ == "__main__":
