@@ -110,20 +110,29 @@ def build_scored_df(test_pairs_csv, image_dir, title_csv, pref_csv):
     pairs["item"] = pairs["item"].astype(str)
     pairs["user"] = pairs["user"].astype(str)
 
-    titles = pd.read_csv(title_csv, header=None, names=["item", "title"]) \
-        if pd.read_csv(title_csv, nrows=1).shape[1] == 2 \
-        else pd.read_csv(title_csv)
+    # --- titles: detect whether file has a header row ---
+    _peek = pd.read_csv(title_csv, nrows=1, header=None)
+    has_header = any(isinstance(v, str) and not str(v).strip().isdigit()
+                     for v in _peek.iloc[0].tolist()[:1])
+    if has_header:
+        titles = pd.read_csv(title_csv)
+    else:
+        titles = pd.read_csv(title_csv, header=None, names=["item", "title"])
     titles.columns = [c.strip().lower() for c in titles.columns]
+    if "item_id" in titles.columns:
+        titles.rename(columns={"item_id": "item"}, inplace=True)
     titles["item"] = titles["item"].astype(str)
 
-    prefs = pd.read_csv(pref_csv, header=None, names=["user", "preference"]) \
-        if pd.read_csv(pref_csv, nrows=1).shape[1] == 2 \
-        else pd.read_csv(pref_csv)
+    # --- preferences: handle (user_id,summary) | (user,preference) | header-less ---
+    prefs = pd.read_csv(pref_csv)
     prefs.columns = [c.strip().lower() for c in prefs.columns]
     if "user_id" in prefs.columns:
         prefs.rename(columns={"user_id": "user"}, inplace=True)
     if "summary" in prefs.columns and "preference" not in prefs.columns:
         prefs.rename(columns={"summary": "preference"}, inplace=True)
+    if "user" not in prefs.columns or "preference" not in prefs.columns:
+        # fallback: assume header-less 2-col file
+        prefs = pd.read_csv(pref_csv, header=None, names=["user", "preference"])
     prefs["user"] = prefs["user"].astype(str)
 
     img_dir = Path(image_dir)
