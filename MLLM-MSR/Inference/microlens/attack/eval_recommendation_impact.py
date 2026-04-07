@@ -316,6 +316,75 @@ def compare_preferences(clean_pref_csv, attacked_pref_csv, user_items_tsv,
             }
     report["keyword_in_preferences"] = keyword_analysis
 
+    # ------------------------------------------------------------------
+    # Exposure direction analysis (proxy for delta_exposure)
+    # For each attacked item, count how often its title tokens are
+    # mentioned in user preference summaries before vs after the attack.
+    # Positive delta => attack INCREASES the item's exposure/mention.
+    # Negative delta => attack DECREASES it.
+    # ------------------------------------------------------------------
+    exposure_report = {}
+    try:
+        if attacked_summary_csv:
+            atk_df_full = pd.read_csv(attacked_summary_csv)
+            atk_df_full.columns = [c.strip().lower() for c in atk_df_full.columns]
+            title_col = None
+            for c in ("title", "item_title", "name"):
+                if c in atk_df_full.columns:
+                    title_col = c
+                    break
+            stop = {"the", "a", "an", "of", "and", "for", "to", "in", "on",
+                    "with", "by", "is", "are", "this", "that", "it", "from"}
+            clean_texts = [str(s).lower() for s in merged["summary_clean"].astype(str)]
+            atk_texts = [str(s).lower() for s in merged["summary_attacked"].astype(str)]
+            per_item = []
+            total_before = 0
+            total_after = 0
+            for _, r in atk_df_full.iterrows():
+                iid = str(r["item_id"])
+                title = str(r.get(title_col, "")) if title_col else ""
+                tokens = [t for t in title.lower().split()
+                          if len(t) > 3 and t not in stop]
+                if not tokens:
+                    continue
+                # an item is "mentioned" if ANY of its distinctive tokens appears
+                before = sum(1 for s in clean_texts if any(t in s for t in tokens))
+                after = sum(1 for s in atk_texts if any(t in s for t in tokens))
+                total_before += before
+                total_after += after
+                per_item.append({
+                    "item_id": iid,
+                    "title": title[:80],
+                    "exposure_before": before,
+                    "exposure_after": after,
+                    "delta": after - before,
+                })
+            per_item.sort(key=lambda x: x["delta"], reverse=True)
+            n_items = len(per_item)
+            n_increased = sum(1 for x in per_item if x["delta"] > 0)
+            n_decreased = sum(1 for x in per_item if x["delta"] < 0)
+            n_unchanged = sum(1 for x in per_item if x["delta"] == 0)
+            exposure_report = {
+                "n_items_evaluated": n_items,
+                "total_exposure_before": total_before,
+                "total_exposure_after": total_after,
+                "total_delta": total_after - total_before,
+                "mean_delta_per_item": (total_after - total_before) / max(n_items, 1),
+                "items_exposure_increased": n_increased,
+                "items_exposure_decreased": n_decreased,
+                "items_exposure_unchanged": n_unchanged,
+                "direction": (
+                    "boost" if (total_after - total_before) > 0
+                    else "suppress" if (total_after - total_before) < 0
+                    else "neutral"
+                ),
+                "top_boosted_items": per_item[:10],
+                "top_suppressed_items": per_item[-10:][::-1],
+            }
+    except Exception as e:
+        exposure_report = {"error": str(e)}
+    report["exposure_direction"] = exposure_report
+
     # Most changed users
     most_changed = merged.nsmallest(10, "jaccard")
     report["most_changed_users"] = [
@@ -352,6 +421,13 @@ def compare_preferences(clean_pref_csv, attacked_pref_csv, user_items_tsv,
         print(f"\n  Affected users mean Jaccard: {au['mean_jaccard']:.4f} (n={au['count']})")
         if uu["mean_jaccard"] is not None:
             print(f"  Unaffected users mean Jaccard: {uu['mean_jaccard']:.4f} (n={uu['count']})")
+    if exposure_report and "total_delta" in exposure_report:
+        er = exposure_report
+        print(f"\nExposure direction (proxy via title-token mentions):")
+        print(f"  Items evaluated: {er['n_items_evaluated']}")
+        print(f"  Total exposure before -> after: {er['total_exposure_before']} -> {er['total_exposure_after']}  (delta={er['total_delta']:+d})")
+        print(f"  Items boosted/suppressed/unchanged: {er['items_exposure_increased']}/{er['items_exposure_decreased']}/{er['items_exposure_unchanged']}")
+        print(f"  Overall direction: {er['direction'].upper()}")
     print()
 
     return report
