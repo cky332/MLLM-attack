@@ -191,10 +191,12 @@ def score_dataframe(df, model_id, batch_size=12, num_proc=1):
     from PIL import ImageOps
     from torch.cuda.amp import autocast
 
-    _lazy_load_model(model_id)
     ds = Dataset.from_pandas(df).cast_column("image", Image())
 
     def gpu_fn(batch, rank):
+        # Each worker process must load its own model copy (spawn does not
+        # inherit parent globals).
+        _lazy_load_model(model_id)
         device = f"cuda:{(rank or 0) % torch.cuda.device_count()}"
         _MODEL.to(device)
         imgs = batch["image"]
