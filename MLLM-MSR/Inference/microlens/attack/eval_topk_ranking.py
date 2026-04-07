@@ -190,15 +190,41 @@ def score_dataframe(df, model_id, batch_size=12, num_proc=1):
     from datasets import Dataset, Image
     from PIL import ImageOps
     from torch.cuda.amp import autocast
+    from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration
 
     ds = Dataset.from_pandas(df).cast_column("image", Image())
 
     def gpu_fn(batch, rank):
-        # Each worker process must load its own model copy (spawn does not
-        # inherit parent globals).
-        _lazy_load_model(model_id)
+        # Load model/processor once per worker process. We stash them in
+        # builtins so the cache survives across batches in the same worker
+        # but isn't captured by cloudpickle when the closure is shipped.
+        import builtins
+        cache = getattr(builtins, "_topk_eval_cache", None)
+        if cache is None:
+            default_dtype = torch.get_default_dtype()
+            torch.set_default_dtype(torch.float16)
+            mdl = LlavaNextForConditionalGeneration.from_pretrained(
+                model_id,
+                cache_dir=os.path.expanduser("~/.cache/huggingface/hub"),
+                attn_implementation="flash_attention_2",
+                torch_dtype=torch.float16,
+            ).eval()
+            torch.set_default_dtype(default_dtype)
+            mdl.tie_weights()
+            proc = LlavaNextProcessor.from_pretrained(model_id)
+            proc.tokenizer.pad_token = proc.tokenizer.eos_token
+            proc.tokenizer.add_tokens(["<|image|>", "<pad>"], special_tokens=True)
+            yes_id = proc.tokenizer.convert_tokens_to_ids("Yes")
+            no_id = proc.tokenizer.convert_tokens_to_ids("No")
+            cache = {"model": mdl, "proc": proc, "yes_id": yes_id, "no_id": no_id}
+            builtins._topk_eval_cache = cache
+        mdl = cache["model"]
+        proc = cache["proc"]
+        yes_id = cache["yes_id"]
+        no_id = cache["no_id"]
+
         device = f"cuda:{(rank or 0) % torch.cuda.device_count()}"
-        _MODEL.to(device)
+        mdl.to(device)
         imgs = batch["image"]
         max_w = max(im.width for im in imgs)
         max_h = max(im.height for im in imgs)
@@ -210,16 +236,16 @@ def score_dataframe(df, model_id, batch_size=12, num_proc=1):
                 dw, dh = max_w - im.width, max_h - im.height
                 pad = (dw // 2, dh // 2, dw - dw // 2, dh - dh // 2)
                 padded.append(ImageOps.expand(im, border=pad, fill="black"))
-        inputs = _PROCESSOR(text=batch["prompt"], images=padded,
-                            return_tensors="pt", padding=True).to(device)
+        inputs = proc(text=batch["prompt"], images=padded,
+                      return_tensors="pt", padding=True).to(device)
         with torch.no_grad(), autocast():
-            outputs = _MODEL.generate(**inputs, max_new_tokens=1,
-                                      return_dict_in_generate=True,
-                                      output_scores=True)
+            outputs = mdl.generate(**inputs, max_new_tokens=1,
+                                   return_dict_in_generate=True,
+                                   output_scores=True)
         scores = outputs["scores"][0]
         return {
-            "yes_logits": scores[:, _YES_ID].float().cpu().tolist(),
-            "no_logits": scores[:, _NO_ID].float().cpu().tolist(),
+            "yes_logits": scores[:, yes_id].float().cpu().tolist(),
+            "no_logits": scores[:, no_id].float().cpu().tolist(),
         }
 
     out = ds.map(gpu_fn, batched=True, batch_size=batch_size,
