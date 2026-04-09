@@ -101,7 +101,7 @@ def prepare_drift_summaries(clean_summary_csv, attacked_summary_csv,
 
 
 def run_preference_for_drift(visual_csv, title_csv, user_items_tsv, output_csv,
-                             model_id="meta-llama/Meta-Llama-3-8B-Instruct",
+                             model_id="/home/chenkuiyun/.cache/modelscope/LLM-Research/Meta-Llama-3-8B-Instruct",
                              num_proc=4, batch_size=12):
     """Run preference inference using the drift-modified summaries.
 
