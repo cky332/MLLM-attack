@@ -7,6 +7,7 @@ Aggregates outputs from:
   - generate_hubness_attack.py     -> results/hubness_report*.json         (Part 3)
   - targeted_recommendation.py     -> results/targeted_attack_report*.json (Part 4)
   - eval_preference_drift.py       -> results/preference_drift/*.json      (Part 5)
+  - eval_topk_ranking.py           -> results/topk_ranking_*.json          (Part 6)
 
 Usage:
     python summary_all.py [--results_dir results]
@@ -128,6 +129,58 @@ def part5_drift(results_dir):
                     print(f"    {k}: {v}")
 
 
+def part6_topk_ranking(results_dir):
+    files = sorted(glob.glob(os.path.join(results_dir, "topk_ranking_*.json")))
+    if not files:
+        print("(no topk_ranking_*.json found — run eval_topk_ranking.py)")
+        return
+
+    # Print clean baseline once (same across all attacks)
+    first = _load(files[0])
+    if "_error" not in first:
+        gc = first.get("global_metrics", {}).get("clean", {})
+        print(f"  Clean baseline: Recall@10={gc.get('recall@10', 0):.4f}  "
+              f"NDCG@10={gc.get('ndcg@10', 0):.4f}  "
+              f"MRR@10={gc.get('mrr@10', 0):.4f}")
+        print()
+
+    print(f'{"Attack":<30} '
+          f'{"R@10":>7} {"dR@10":>7} '
+          f'{"N@10":>7} {"dN@10":>7} '
+          f'{"MRR@10":>7} {"dMRR":>7} '
+          f'{"MeanRk":>7} {"dRank":>7} '
+          f'{"Improv":>7} {"Worse":>7}')
+    print("-" * 112)
+
+    for f in files:
+        name = os.path.basename(f).replace("topk_ranking_", "").replace(".json", "")
+        r = _load(f)
+        if "_error" in r:
+            continue
+        gm = r.get("global_metrics", {})
+        gc = gm.get("clean", {})
+        ga = gm.get("attacked", {})
+        ra = r.get("rank_analysis_all_positives", {})
+
+        r10_c = gc.get("recall@10", 0)
+        r10_a = ga.get("recall@10", 0)
+        n10_c = gc.get("ndcg@10", 0)
+        n10_a = ga.get("ndcg@10", 0)
+        mrr_c = gc.get("mrr@10", 0)
+        mrr_a = ga.get("mrr@10", 0)
+        mr_a = ra.get("mean_rank_attacked", 0)
+        mr_d = ra.get("mean_rank_delta", 0)
+        n_imp = ra.get("n_users_rank_improved", 0)
+        n_wor = ra.get("n_users_rank_worsened", 0)
+
+        print(f'{name:<30} '
+              f'{r10_a:>7.4f} {r10_a - r10_c:>+7.4f} '
+              f'{n10_a:>7.4f} {n10_a - n10_c:>+7.4f} '
+              f'{mrr_a:>7.4f} {mrr_a - mrr_c:>+7.4f} '
+              f'{mr_a:>7.2f} {mr_d:>+7.3f} '
+              f'{n_imp:>7} {n_wor:>7}')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results_dir", default="results")
@@ -151,6 +204,9 @@ def main():
 
     print("\n--- Part 5: User Preference Drift (multi-interaction) ---")
     part5_drift(args.results_dir)
+
+    print("\n--- Part 6: Real Top-K Ranking Impact ---")
+    part6_topk_ranking(args.results_dir)
 
     print("\n" + "=" * 100)
 
