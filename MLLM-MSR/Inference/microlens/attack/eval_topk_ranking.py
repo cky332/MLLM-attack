@@ -147,7 +147,7 @@ def build_scored_df(test_pairs_csv, image_dir, title_csv, pref_csv):
     df["prompt"] = df.apply(
         lambda r: PROMPT_TEMPLATE.format(r["preference"], r["title"]), axis=1
     )
-    df = df[["user", "item", "label", "prompt", "image"]].reset_index(drop=True)
+    df = df[["user", "item", "label", "prompt", "image", "preference"]].reset_index(drop=True)
     return df
 
 
@@ -385,6 +385,47 @@ def evaluate(args):
             json.dump(report, f, ensure_ascii=False, indent=2)
         print(f"[topk] Report saved to {args.output_report}")
 
+    # --- User-group breakdown (for targeted push evaluation) ---
+    if args.target_cluster_keyword:
+        kw = args.target_cluster_keyword.lower()
+        print(f"\n--- User-Group Breakdown (keyword='{kw}') ---")
+        # Identify target users: those whose clean preference mentions the keyword
+        user_prefs = [str(df_clean.iloc[i * K_per]["preference"]).lower()
+                      for i in range(n_users)]
+        target_mask = np.array([kw in pref for pref in user_prefs])
+        for group_name, mask in [("target_users", target_mask),
+                                 ("non_target_users", ~target_mask)]:
+            if not mask.any():
+                print(f"  {group_name}: no users found")
+                continue
+            g_labels = labels[mask]
+            g_clean = yes_clean_g[mask]
+            g_atk = yes_atk_g[mask]
+            g_rc = rank_clean[mask & valid]
+            g_ra = rank_atk[mask & valid]
+            g_valid = (g_rc > 0) & (g_ra > 0) if g_rc.size else np.array([], dtype=bool)
+            group_report = {
+                "n_users": int(mask.sum()),
+                "recall@10_clean": recall_at_k(g_labels, g_clean, 10),
+                "recall@10_attacked": recall_at_k(g_labels, g_atk, 10),
+                "ndcg@10_clean": ndcg_at_k(g_labels, g_clean, 10),
+                "ndcg@10_attacked": ndcg_at_k(g_labels, g_atk, 10),
+            }
+            if g_valid.any():
+                delta = g_ra[g_valid] - g_rc[g_valid]
+                group_report["mean_rank_delta"] = float(np.mean(delta))
+            report[group_name] = group_report
+            r10d = group_report.get("recall@10_attacked", 0) - group_report.get("recall@10_clean", 0)
+            print(f"  {group_name} (n={group_report['n_users']}): "
+                  f"R@10 {group_report.get('recall@10_clean',0):.4f}→{group_report.get('recall@10_attacked',0):.4f} "
+                  f"(delta={r10d:+.4f})"
+                  f"  rank_delta={group_report.get('mean_rank_delta', 'N/A')}")
+
+        # Re-save with group data
+        if args.output_report:
+            with open(args.output_report, "w", encoding="utf-8") as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
+
     print("\n" + "=" * 70)
     print(f"TOP-K RANKING REPORT  ({args.attack_name})")
     print("=" * 70)
@@ -430,6 +471,9 @@ def main():
     p.add_argument("--batch_size", type=int, default=12)
     p.add_argument("--num_proc", type=int, default=1)
     p.add_argument("--model_id", default="llava-hf/llava-v1.6-mistral-7b-hf")
+    p.add_argument("--target_cluster_keyword", default=None,
+                   help="If set, split ranking report by users whose clean preference "
+                        "mentions this keyword vs those who don't (for targeted push eval)")
     args = p.parse_args()
     evaluate(args)
 
