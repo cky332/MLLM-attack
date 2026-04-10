@@ -17,7 +17,7 @@ set -euo pipefail
 # ---- Configurable paths (EDIT THESE) ----
 SRC_IMG_DIR="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/MicroLens-50k/MicroLens-50k_covers"
 TITLE_CSV="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/MicroLens-50k/MicroLens-50k_titles.csv"
-PAIRS_CSV="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/MicroLens-50k/MicroLens-50k_pairs.csv"
+PAIRS_CSV="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/microlens/MicroLens-50k_pairs.csv"
 USER_ITEMS_TSV="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/MicroLens-50k/Split/user_items_negs.tsv"
 TEST_PAIRS_CSV="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/MicroLens-50k/Split/test_pairs.csv"
 CLEAN_SUMMARY="/home/chenkuiyun/MLLM-attack/image_summary.csv"
