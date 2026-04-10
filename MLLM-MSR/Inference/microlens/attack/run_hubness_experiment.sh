@@ -40,6 +40,7 @@ MERGED_SUMMARY="$HUBNESS_DIR/image_summary_merged.csv"
 ATTACKED_PREF="$HUBNESS_DIR/user_preference_attacked.csv"
 TOPK_REPORT="$HUBNESS_DIR/topk_ranking_report.json"
 HUBNESS_REPORT="$HUBNESS_DIR/hubness_report.json"
+HUBNESS_RANKING_REPORT="$HUBNESS_DIR/hubness_ranking_report.json"
 
 mkdir -p "$HUBNESS_DIR"
 cd "$SCRIPT_DIR"
@@ -130,11 +131,30 @@ else
         --output_report        "$HUBNESS_REPORT"
 fi
 
+# ── Step 6: Hubness-specific ranking evaluation [GPU] ──
+# Scores (B-user, source_A) pairs to measure if A is pushed toward B's users
+if [[ -f "$HUBNESS_RANKING_REPORT" ]]; then
+    echo "[Step 6] SKIP (hubness ranking report exists)"
+else
+    echo "[Step 6] Evaluating hubness via LLaVA scoring (B-user, source_A)..."
+    python eval_hubness_ranking.py \
+        --pair_mapping         "$PAIR_MAPPING" \
+        --image_dir            "$SRC_IMG_DIR" \
+        --title_csv            "$TITLE_CSV" \
+        --clean_pref_csv       "$CLEAN_PREF" \
+        --attacked_pref_csv    "$ATTACKED_PREF" \
+        --user_items_tsv       "$USER_ITEMS_TSV" \
+        --output_report        "$HUBNESS_RANKING_REPORT" \
+        --max_users_per_pair 50 \
+        --batch_size "$BATCH_SIZE"
+fi
+
 echo ""
 echo "============================================================"
 echo "HUBNESS EXPERIMENT COMPLETE"
 echo "Results in: $HUBNESS_DIR/"
-echo "  pair_mapping.json       — source→target pairs"
-echo "  hubness_report.json     — text-level hubness gain"
-echo "  topk_ranking_report.json — real top-K ranking impact"
+echo "  pair_mapping.json              — source→target pairs"
+echo "  hubness_report.json            — text-level hubness gain"
+echo "  topk_ranking_report.json       — global top-K ranking impact"
+echo "  hubness_ranking_report.json    — hubness-specific: A's score among B-users"
 echo "============================================================"
