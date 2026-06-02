@@ -203,6 +203,21 @@ def detect(args):
             if m != "sklearn":
                 problems.append(f"env:{m}")
 
+    # CLIP weights the attack needs (separate download from the cached LLaVA;
+    # LLaVA bundles only the vision tower, not CLIP's text encoder).
+    clip_roots = [os.environ.get("HF_HOME"), os.environ.get("TRANSFORMERS_CACHE"),
+                  os.path.expanduser("~/.cache/huggingface")]
+    clip_cached = any(
+        r and glob.glob(os.path.join(r, "**", "models--openai--clip-vit-large-patch14-336"),
+                        recursive=True)
+        for r in clip_roots if r)
+    if clip_cached:
+        print(f"{OK} CLIP openai/clip-vit-large-patch14-336 cached")
+    else:
+        print(f"{WARN} CLIP openai/clip-vit-large-patch14-336 NOT cached — auto-downloads "
+              f"(~1.7GB) on first run; if offline, pre-fetch:")
+        print(f"        huggingface-cli download openai/clip-vit-large-patch14-336")
+
     # ---- command block ----
     run = f"{root}/MLLM-MSR/Inference/microlens/attack/results/illusion_eps16"
     print("\n" + "=" * 72)

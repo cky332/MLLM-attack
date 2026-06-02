@@ -70,6 +70,12 @@ def evaluate(args):
     # Stable grid order: group candidates by user.
     pairs = pairs.sort_values(["user", "item"]).reset_index(drop=True)
 
+    if args.max_users > 0:
+        keep = pd.unique(pairs["user"])[: args.max_users]
+        pairs = pairs[pairs["user"].isin(keep)].reset_index(drop=True)
+        print(f"[illusion-eval] PILOT: limited to first {len(keep)} users "
+              f"({len(pairs)} rows)")
+
     attacked_dir = Path(args.attacked_image_dir)
     attacked_items = {p.stem for p in attacked_dir.glob("*") if p.is_file()}
     print(f"[illusion-eval] adversarial images available for {len(attacked_items)} items")
@@ -216,6 +222,8 @@ def main():
     p.add_argument("--candidates_per_user", type=int, default=21)
     p.add_argument("--topk", type=int, default=10)
     p.add_argument("--decision_threshold", type=float, default=0.5)
+    p.add_argument("--max_users", type=int, default=0,
+                   help="evaluate only the first N users (0 = all); for a cheap pilot")
     p.add_argument("--batch_size", type=int, default=12)
     p.add_argument("--model_id", default="llava-hf/llava-v1.6-mistral-7b-hf")
     args = p.parse_args()
