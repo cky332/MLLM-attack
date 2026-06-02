@@ -65,10 +65,12 @@ s.t.    ‖δ‖_∞ ≤ ε,   x+δ ∈ [0,1]
 
 | File | Role |
 |------|------|
-| `illusion_attack.py` | core attack: `build_target` → `generate` (PGD on CLIP) → `embed_asr` |
+| `illusion_attack.py` | CLIP image↔text illusion: `build_target` → `generate` (PGD on CLIP) → `embed_asr` |
+| `illusion_attack_llava.py` | **feature-space illusion in LLaVA's own visual tokens** (use this — see §9) |
 | `illusion_metrics.py` | numpy-only ASR definitions (shared, unit-tested) |
 | `eval_illusion_sft.py` | **final re-ranking with your fine-tuned LoRA** (clean vs attacked) — use this if you've already trained |
 | `eval_illusion_ranking.py` | same eval but with the **base** LLaVA (no adapter) |
+| `preflight_illusion.py` | auto-detect/validate paths + env; prints ready-to-run commands |
 | `run_illusion_experiment.sh` | end-to-end runner (3 steps) |
 | `test_illusion_attack.py` | GPU-free tests for the metrics **and** the PGD algorithm |
 
@@ -245,3 +247,48 @@ and the model weights, so they run on the cluster, not here.
   recommendation-level ASR further, at higher cost; the encoder-space attack is
   the paper's method and is task-agnostic.
 * **Ethics.** For security evaluation of MLLM-based recommenders only.
+
+---
+
+## 9. Feature-space illusion (recommended — `illusion_attack_llava.py`)
+
+**Pilot finding.** The CLIP image↔text illusion (§2) reaches ~99% embedding ASR
+(mean cos to popular text 0.22→0.56 at ε=16/255) but barely moves the fine-tuned
+recommender: P(Yes) 0.530→0.526, AUC/NDCG within noise, decision-flip ASR ~11%.
+Reason: **LLaVA-Next does not read CLIP's pooled contrastive embedding**
+(`get_image_features`). It feeds the LLM the vision tower's `vision_feature_layer`
+(=-2) patch hidden states (CLS dropped) through `multi_modal_projector`. Aligning
+the contrastive embedding therefore optimizes a representation LLaVA ignores; the
+any-res up-sampling dilutes it further.
+
+`illusion_attack_llava.py` fixes this by perturbing the cover so its **LLaVA
+visual tokens** (exactly `projector(vision_tower(x).hidden_states[-2][:,1:])`)
+align with those of **popular item covers** — "look like a popular video" in the
+space that actually drives P(Yes). It backprops only through the vision tower +
+projector (no 7B LLM), so it runs on one 24GB card.
+
+```bash
+RUN2=$PWD/results/illusion_llava_pilot
+# 1) target = LLaVA features of the top-10 popular covers
+python illusion_attack_llava.py build_target \
+    --src_dir $COVERS --pairs_csv $PAIRS --title_csv $TITLE \
+    --top_n 10 --out_target $RUN2/popular_target.pt --device cuda:0
+# 2) perturb candidate covers to impersonate popular-cover features
+CUDA_VISIBLE_DEVICES=0 python illusion_attack_llava.py generate \
+    --src_dir $COVERS --out_dir $RUN2/images --clean_resized_dir $RUN2/clean_resized \
+    --target $RUN2/popular_target.pt --items_csv $PILOT \
+    --target_mode impersonate --eps 16 --iters 300 --batch_size 8 --device cuda:0
+python illusion_attack_llava.py embed_asr --manifest $RUN2/images
+# 3) same LoRA re-ranking eval as §4 (--num_proc = #GPUs, batch 1 on 24GB)
+CUDA_VISIBLE_DEVICES=0,1,2 python eval_illusion_sft.py \
+    --peft_model_id $LORA --test_pairs_csv $PILOT \
+    --clean_image_dir $RUN2/clean_resized --attacked_image_dir $RUN2/images \
+    --title_csv $TITLE --pref_csv $PREF --output_report $RUN2/recsys_asr_sft.json \
+    --candidates_per_user 21 --batch_size 1 --num_proc 3
+```
+
+`--target_mode impersonate` (default) matches each candidate's per-token features
+to a popular cover sampled from the top-N set; `--target_mode centroid` aligns the
+mean-pooled feature to the popular centroid. If transfer is still weak, raise
+`--eps 32`, or escalate to an end-to-end attack on LLaVA's `Yes`-logit (the
+strongest option; backprops through the 7B LLM).
