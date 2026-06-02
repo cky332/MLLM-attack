@@ -24,15 +24,19 @@ SRC_IMG_DIR="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/MicroLens-50k/MicroLens-
 TITLE_CSV="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/microlens/MicroLens-50k_titles.csv"
 PAIRS_CSV="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/microlens/MicroLens-50k_pairs.csv"
 TEST_PAIRS_CSV="/home/chenkuiyun/MLLM-attack/MLLM-MSR/data/MicroLens-50k/Split/test_pairs.csv"
-CLEAN_PREF="/home/chenkuiyun/MLLM-attack/user_preference_recurrent.csv"
+CLEAN_PREF="/home/chenkuiyun/MLLM/user_preference_recurrent.csv"
+# Your ALREADY fine-tuned LoRA recommender (the one test_with_llava_sft.py loads).
+# Leave empty ("") to score the base model instead.
+PEFT_MODEL_ID="/home/chenkuiyun/MLLM/output/llava-v1.6-mistral-7b-hf-lora-recurrent-e4-r16"
 
 # ---- Experiment parameters ----
 EPS="${1:-16}"        # L_inf budget /255 (paper standard = 16; try 8 / 32 too)
 ITERS="${2:-300}"     # PGD iterations
 TOP_N="${3:-20}"      # # most-popular titles forming the target centroid
 N_ITEMS="${4:-0}"     # limit # attacked items (0 = every item in TEST_PAIRS_CSV)
-BATCH_SIZE="${5:-12}"
+BATCH_SIZE="${5:-4}"
 DEVICE="${6:-cuda:0}"
+NUM_PROC="${7:-1}"    # set to #GPUs for multi-GPU LoRA scoring
 
 # ---- Derived paths ----
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -81,12 +85,15 @@ else
         --batch_size "$BATCH_SIZE" --device "$DEVICE"
 fi
 
-# ── Step 3: Recommendation-level ASR [GPU: LLaVA Yes/No judgment] ──
+# ── Step 3: Final re-ranking with your FINE-TUNED LoRA recommender [GPU] ──
+# Reuses your trained adapter + generated preferences; only re-scores the final
+# Yes/No judgment on clean vs adversarial images. No retraining, no pref regen.
 if [[ -f "$RECSYS_REPORT" ]]; then
     echo "[Step 3] SKIP (recsys ASR exists: $RECSYS_REPORT)"
 else
-    echo "[Step 3] Measuring recommendation-level ASR (clean vs adversarial image)..."
-    python eval_illusion_ranking.py \
+    echo "[Step 3] Re-scoring final ranking with fine-tuned LoRA (clean vs adversarial)..."
+    python eval_illusion_sft.py \
+        --peft_model_id      "$PEFT_MODEL_ID" \
         --test_pairs_csv     "$TEST_PAIRS_CSV" \
         --clean_image_dir    "$CLEAN_RESIZED_DIR" \
         --attacked_image_dir "$ADV_DIR" \
@@ -95,7 +102,7 @@ else
         --attack_name        "illusion_eps${EPS}_it${ITERS}" \
         --output_report      "$RECSYS_REPORT" \
         --candidates_per_user 21 --topk 10 \
-        --batch_size "$BATCH_SIZE"
+        --batch_size "$BATCH_SIZE" --num_proc "$NUM_PROC"
 fi
 
 echo ""
