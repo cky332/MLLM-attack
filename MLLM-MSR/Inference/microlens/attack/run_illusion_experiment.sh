@@ -116,7 +116,13 @@ fi
 if [[ -f "$RECSYS_REPORT" ]]; then
     echo "[Step 3] SKIP (recsys ASR exists: $RECSYS_REPORT)"
 else
-    echo "[Step 3] Re-scoring final ranking with fine-tuned LoRA (clean vs adversarial)..."
+    # One 7B model loads PER worker, so num_proc must not exceed the #GPUs
+    # exposed via CUDA_VISIBLE_DEVICES, and LLaVA-Next anyres needs a small
+    # batch on 24GB cards (override with EVAL_BATCH_SIZE).
+    NGPU=$(python -c "import torch;print(torch.cuda.device_count())" 2>/dev/null || echo 1)
+    EVAL_NPROC=$(( NUM_PROC < NGPU ? NUM_PROC : NGPU )); [[ $EVAL_NPROC -lt 1 ]] && EVAL_NPROC=1
+    echo "[Step 3] Re-scoring final ranking with fine-tuned LoRA "
+    echo "         (clean vs adversarial; num_proc=$EVAL_NPROC, batch=${EVAL_BATCH_SIZE:-1})..."
     python eval_illusion_sft.py \
         --peft_model_id      "$PEFT_MODEL_ID" \
         --test_pairs_csv     "$TEST_PAIRS_CSV" \
@@ -127,7 +133,7 @@ else
         --attack_name        "illusion_eps${EPS}_it${ITERS}" \
         --output_report      "$RECSYS_REPORT" \
         --candidates_per_user 21 --topk 10 \
-        --batch_size "$BATCH_SIZE" --num_proc "$NUM_PROC"
+        --batch_size "${EVAL_BATCH_SIZE:-1}" --num_proc "$EVAL_NPROC"
 fi
 
 echo ""

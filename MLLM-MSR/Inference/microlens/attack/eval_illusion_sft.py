@@ -117,10 +117,14 @@ def score_with_lora(df, base_model_id, peft_model_id, batch_size=4, num_proc=1):
             outputs = mdl.generate(**inputs, max_new_tokens=1,
                                    return_dict_in_generate=True, output_scores=True)
         scores = outputs["scores"][0]
-        return {
+        result = {
             "yes_logits": scores[:, yes_id].float().cpu().tolist(),
             "no_logits": scores[:, no_id].float().cpu().tolist(),
         }
+        # Free per-batch activations/KV-cache so 24GB cards don't creep into OOM.
+        del inputs, outputs, scores
+        torch.cuda.empty_cache()
+        return result
 
     out = ds.map(gpu_fn, batched=True, batch_size=batch_size,
                  with_rank=True, num_proc=num_proc)
