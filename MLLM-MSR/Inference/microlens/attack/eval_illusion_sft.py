@@ -158,6 +158,12 @@ def evaluate(args):
     pairs["user"] = pairs["user"].astype(str).str.strip()
     pairs = pairs.sort_values(["user", "item"]).reset_index(drop=True)
 
+    if args.max_users > 0:
+        keep = pd.unique(pairs["user"])[: args.max_users]
+        pairs = pairs[pairs["user"].isin(keep)].reset_index(drop=True)
+        print(f"[illusion-sft] PILOT: limited to first {len(keep)} users "
+              f"({len(pairs)} rows)")
+
     attacked_items = {p.stem for p in Path(args.attacked_image_dir).glob("*") if p.is_file()}
     print(f"[illusion-sft] adversarial images for {len(attacked_items)} items")
 
@@ -296,6 +302,9 @@ def main():
     p.add_argument("--candidates_per_user", type=int, default=21)
     p.add_argument("--topk", type=int, default=10)
     p.add_argument("--decision_threshold", type=float, default=0.5)
+    p.add_argument("--max_users", type=int, default=0,
+                   help="evaluate only the first N users (0 = all). Use for a "
+                        "cheap pilot, mirroring test_with_llava_sft.py's select().")
     p.add_argument("--batch_size", type=int, default=4)
     p.add_argument("--num_proc", type=int, default=1, help="set to #GPUs for multi-GPU")
     args = p.parse_args()
