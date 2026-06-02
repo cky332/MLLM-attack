@@ -243,13 +243,16 @@ done; wait
 python illusion_attack.py embed_asr --manifest {run}/images   # merged embedding ASR
 
 # 3) re-evaluate the final ranking with your fine-tuned LoRA
+#    IMPORTANT: one 7B model loads PER GPU, so --num_proc MUST equal the number
+#    of GPUs you expose (CUDA_VISIBLE_DEVICES). batch_size 1-2 on 24GB cards.
+NGPU=$(python -c "import torch;print(torch.cuda.device_count())")
 python eval_illusion_sft.py \\
     --peft_model_id {lora} \\
     --test_pairs_csv {test_pairs} \\
     --clean_image_dir {run}/clean_resized --attacked_image_dir {run}/images \\
     --title_csv {titles} --pref_csv {pref} \\
     --output_report {run}/recsys_asr_sft.json \\
-    --candidates_per_user {cpu or 21} --batch_size 4 --num_proc 8""")
+    --candidates_per_user {cpu or 21} --batch_size 1 --num_proc ${{NGPU}}""")
 
     print("\n" + ("PREFLIGHT OK — paths look good." if not problems
                   else f"PREFLIGHT found issues: {sorted(set(problems))}"))
