@@ -196,11 +196,25 @@ def recall_at_k(y_true, y_prob, k):
 def ndcg_at_k(y_true, y_prob, k):
     y_true = np.asarray(y_true)
 
-    def dcg(scores, k):
-        discounts = np.log2(np.arange(2, k + 2))
+    def dcg(scores):
+        # Discounts sized to the actual width (handles k > #candidates safely).
+        discounts = np.log2(np.arange(2, scores.shape[1] + 2))
         return np.sum((2 ** scores - 1) / discounts, axis=1)
 
     order = np.argsort(-np.asarray(y_prob, dtype=np.float64), axis=1)
     sorted_scores = np.take_along_axis(y_true, order, axis=1)[:, :k]
     ideal = np.sort(y_true, axis=1)[:, ::-1][:, :k]
-    return float(np.mean(dcg(sorted_scores, k) / (dcg(ideal, k) + 1e-10)))
+    return float(np.mean(dcg(sorted_scores) / (dcg(ideal) + 1e-10)))
+
+
+def mrr_at_k(y_true, y_prob, k):
+    """Mean reciprocal rank @k, identical to test_with_llava_sft.py."""
+    y_true = np.asarray(y_true)
+    order = np.argsort(-np.asarray(y_prob, dtype=np.float64), axis=1)
+    sorted_labels = np.take_along_axis(y_true, order, axis=1)
+    rr = np.zeros(y_true.shape[0])
+    for i, labels in enumerate(sorted_labels[:, :k]):
+        pos = np.where(labels == 1)[0]
+        if pos.size > 0:
+            rr[i] = 1.0 / (pos[0] + 1)
+    return float(np.mean(rr))

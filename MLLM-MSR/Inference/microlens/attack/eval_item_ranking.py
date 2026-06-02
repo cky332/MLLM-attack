@@ -53,7 +53,7 @@ def load_prefs(pref_csv):
         df.rename(columns={"summary": "preference"}, inplace=True)
     if "user" not in df.columns or "preference" not in df.columns:
         df = pd.read_csv(pref_csv, header=None, names=["user", "preference"])
-    df["user"] = df["user"].astype(str)
+    df["user"] = df["user"].astype(str).str.strip()
     return dict(zip(df["user"], df["preference"].astype(str)))
 
 
@@ -66,7 +66,7 @@ def load_titles(title_csv):
     df.columns = [c.strip().lower() for c in df.columns]
     if "item_id" in df.columns:
         df.rename(columns={"item_id": "item"}, inplace=True)
-    df["item"] = df["item"].astype(str)
+    df["item"] = df["item"].astype(str).str.strip()
     return dict(zip(df["item"], df["title"].astype(str)))
 
 

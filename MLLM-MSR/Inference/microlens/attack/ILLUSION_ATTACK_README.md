@@ -67,7 +67,8 @@ s.t.    ‖δ‖_∞ ≤ ε,   x+δ ∈ [0,1]
 |------|------|
 | `illusion_attack.py` | core attack: `build_target` → `generate` (PGD on CLIP) → `embed_asr` |
 | `illusion_metrics.py` | numpy-only ASR definitions (shared, unit-tested) |
-| `eval_illusion_ranking.py` | recommendation-level ASR via the real LLaVA Yes/No judgment |
+| `eval_illusion_sft.py` | **final re-ranking with your fine-tuned LoRA** (clean vs attacked) — use this if you've already trained |
+| `eval_illusion_ranking.py` | same eval but with the **base** LLaVA (no adapter) |
 | `run_illusion_experiment.sh` | end-to-end runner (3 steps) |
 | `test_illusion_attack.py` | GPU-free tests for the metrics **and** the PGD algorithm |
 
@@ -79,13 +80,67 @@ candidate image changes** — isolating the image attack.
 
 ---
 
-## 4. How to run (on the GPU cluster)
+## 4. If you've already run the full pipeline & fine-tuned the model (the common case)
+
+**First, validate paths** (auto-detects covers / test_pairs / titles / popularity
+pairs / the clean preference CSV / your LoRA, and prints the exact commands):
+
+```bash
+python preflight_illusion.py --root /home/chenkuiyun/MLLM-attack
+```
+
+You do **not** re-run training or regenerate user preferences. Only two new
+things happen, and both are the "final-stage" only:
+
+1. **Perturb the candidate images** — `illusion_attack.py generate` (Steps 1–2).
+2. **Re-score the final ranking** with **your existing LoRA recommender** —
+   `eval_illusion_sft.py`, which loads `PeftModel.from_pretrained(base, <your LoRA>)`
+   exactly like `test/microlens/test_with_llava_sft.py`, and reports the same
+   metrics (AUC, Recall/MRR/NDCG@{3,5,10}) for clean vs attacked, plus ASR.
+
+```bash
+# Step A — popular-text target (cheap) + adversarial covers  [GPU]
+python illusion_attack.py build_target \
+    --pairs_csv ../../data/microlens/MicroLens-50k_pairs.csv \
+    --title_csv ../../data/microlens/MicroLens-50k_titles.csv \
+    --top_n 20 --out_target results/illusion/popular_target.npz
+python illusion_attack.py generate \
+    --src_dir /path/to/MicroLens-50k_covers \
+    --out_dir results/illusion/images --clean_resized_dir results/illusion/clean_resized \
+    --target results/illusion/popular_target.npz \
+    --items_csv /path/to/Split/test_pairs.csv --eps 16 --iters 300 --batch_size 16
+
+# Step B — re-evaluate ONLY the final ranking with YOUR fine-tuned LoRA  [GPU]
+python eval_illusion_sft.py \
+    --peft_model_id /home/.../llava-v1.6-mistral-7b-hf-lora-recurrent-e4-r16 \
+    --test_pairs_csv /path/to/Split/test_pairs.csv \
+    --clean_image_dir results/illusion/clean_resized \
+    --attacked_image_dir results/illusion/images \
+    --title_csv ../../data/microlens/MicroLens-50k_titles.csv \
+    --pref_csv  /path/to/user_preference_recurrent.csv \
+    --candidates_per_user 21 --batch_size 4 --num_proc <#GPUs>
+```
+
+`run_illusion_experiment.sh` already wires this up — set `PEFT_MODEL_ID` at the
+top to your adapter and it runs Step A then Step B.
+
+> **Note on your saved test set.** `multi_col_dataset.py` drops the `item`
+> column when it saves `MicroLens-50k-test`, and HF `save_to_disk` embeds image
+> bytes, so the saved dataset can't be re-keyed to swap images by item. We
+> therefore rebuild the identical scoring table from the **same CSVs** your test
+> set was built from (`test_pairs.csv` + titles + `user_preference_recurrent.csv`),
+> using the exact same prompt template. Recall/NDCG/MRR are set-based per user,
+> so within-user ordering doesn't matter — the clean numbers reproduce your run.
+
+---
+
+## 5. Full end-to-end (if starting fresh, base or LoRA model)
 
 One command:
 
 ```bash
-# args: EPS(/255)  ITERS  TOP_N  N_ITEMS(0=all)  BATCH  DEVICE
-bash run_illusion_experiment.sh 16 300 20 0 12 cuda:0
+# args: EPS(/255)  ITERS  TOP_N  N_ITEMS(0=all)  BATCH  DEVICE  NUM_PROC
+bash run_illusion_experiment.sh 16 300 20 0 4 cuda:0 4
 ```
 
 or the three steps explicitly:
@@ -126,7 +181,7 @@ Prerequisites (produced by the MLLM-MSR pipeline in the repo README):
 
 ---
 
-## 5. Attack success rate — what is reported
+## 6. Attack success rate — what is reported
 
 **Embedding-level ASR** (`illusion_attack.py generate` → `images/summary.json`,
 paper Table-1 style): fraction of covers whose adversarial embedding both
@@ -145,7 +200,7 @@ cosine threshold. Reported alongside mean cosine `clean → adv` and mean `‖δ
 
 ---
 
-## 6. Validation in this repo (no GPU needed)
+## 7. Validation in this repo (no GPU needed)
 
 ```bash
 python test_illusion_attack.py
@@ -162,7 +217,7 @@ and the model weights, so they run on the cluster, not here.
 
 ---
 
-## 7. Notes, knobs, and honest limitations
+## 8. Notes, knobs, and honest limitations
 
 * **Target choice.** `--top_n` controls how "popular" the target is; a single
   hand-written `--target_text "..."` is supported for a controlled target. A
@@ -171,11 +226,19 @@ and the model weights, so they run on the cluster, not here.
 * **PNG, not JPEG.** Adversarial covers are saved losslessly (PNG); JPEG is a
   known partial defense (paper §6.1). The attack can be made JPEG-robust by
   optimizing through a differentiable JPEG, which is out of scope here.
-* **LLaVA-Next any-res preprocessing.** The illusion is optimized at the CLIP
-  336×336 input. LLaVA-Next then re-tiles/normalizes the saved image, which can
-  attenuate transfer from the pure CLIP embedding to LLaVA's `P(Yes)`. If the
-  recommendation-level ASR is weaker than the embedding-level ASR, raise `ε`
-  (e.g. 32/255) or `--iters`, or optimize through the LLaVA processor.
+* **LLaVA-Next any-res preprocessing.** This checkout's LLaVA config has
+  `image_grid_pinpoints = [[336,672],[672,336],[672,672],[1008,336],[336,1008]]`,
+  i.e. covers are re-tiled/up-sampled into several 336×336 CLIP tiles. The
+  illusion is optimized at the base 336×336 input, so high-frequency perturbation
+  can be partly attenuated when LLaVA up-samples to 672/1008 tiles. Embedding-level
+  ASR (pure CLIP) will be near-perfect; if the recommendation-level ASR (through
+  LLaVA) lags, raise `ε` (e.g. 32/255) or `--iters`, or optimize through the
+  LlavaNext image processor + vision tower on all tiles (a natural follow-up).
+* **Run in the right env.** The GPU stages need your MLLM conda env
+  (`torch`, `transformers`, `peft`, `datasets`; `sklearn` only for AUC). The
+  vision tower was confirmed to be `clip-vit-large-patch14-336` (336px, patch 14,
+  24 layers, hidden 1024), which is exactly the encoder `illusion_attack.py`
+  attacks.
 * **Stronger variant.** This implements the paper's encoder-space attack
   (image embedding ↔ popular text). An end-to-end variant that backprops the
   `Yes`-token logit through LLaVA directly would likely raise the

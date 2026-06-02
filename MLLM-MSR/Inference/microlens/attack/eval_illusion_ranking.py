@@ -64,8 +64,9 @@ def evaluate(args):
 
     pairs = pd.read_csv(args.test_pairs_csv)
     pairs.columns = [c.strip().lower() for c in pairs.columns]
-    pairs["item"] = pairs["item"].astype(str)
-    pairs["user"] = pairs["user"].astype(str)
+    # test_pairs.csv has stray spaces in some rows (e.g. "40139, 1837,0").
+    pairs["item"] = pairs["item"].astype(str).str.strip()
+    pairs["user"] = pairs["user"].astype(str).str.strip()
     # Stable grid order: group candidates by user.
     pairs = pairs.sort_values(["user", "item"]).reset_index(drop=True)
 
