@@ -325,6 +325,10 @@ def _resolve_items(args):
 
     if args.max_items > 0:
         items = items[: args.max_items]
+    # Multi-GPU: launch one process per GPU, each taking an interleaved slice.
+    if getattr(args, "num_shards", 1) > 1:
+        items = items[args.shard_id :: args.num_shards]
+        print(f"[generate] shard {args.shard_id}/{args.num_shards}: {len(items)} items")
     return items, path_by_item
 
 
@@ -394,8 +398,11 @@ def generate(args):
             ma = np.mean([r["cos_adv"] for r in rows])
             print(f"  {done}/{len(items)}  cos clean={mc:.3f} -> adv={ma:.3f}")
 
+    # When sharded across GPUs, each process writes its own manifest; merge with
+    # `embed_asr --manifest <out_dir>` afterwards.
+    suffix = f"_shard{args.shard_id}" if getattr(args, "num_shards", 1) > 1 else ""
     manifest = pd.DataFrame(rows)
-    man_path = out_dir / "manifest.csv"
+    man_path = out_dir / f"manifest{suffix}.csv"
     manifest.to_csv(man_path, index=False)
 
     asr = embedding_alignment_asr(
@@ -412,7 +419,7 @@ def generate(args):
         "mean_linf_255": float(manifest["linf_255"].mean()) if len(manifest) else 0.0,
         "embedding_asr": asr,
     }
-    with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
+    with open(out_dir / f"summary{suffix}.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
     print("\n" + "=" * 64)
@@ -433,9 +440,14 @@ def generate(args):
 
 
 def embed_asr(args):
-    m = pd.read_csv(args.manifest)
+    p = Path(args.manifest)
+    files = sorted(p.glob("manifest*.csv")) if p.is_dir() else [p]
+    if not files:
+        raise SystemExit(f"No manifest*.csv found at {p}")
+    m = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
     asr = embedding_alignment_asr(m["cos_clean"].values, m["cos_adv"].values,
                                   args.cos_threshold)
+    print(f"[embed_asr] merged {len(files)} manifest(s), {len(m)} images")
     print(json.dumps(asr, indent=2))
 
 
@@ -478,6 +490,10 @@ def main():
                          "CLIP converges far sooner)")
     gn.add_argument("--batch_size", type=int, default=16)
     gn.add_argument("--random_init", action="store_true", help="random PGD start")
+    gn.add_argument("--shard_id", type=int, default=0,
+                    help="this process's shard index (multi-GPU)")
+    gn.add_argument("--num_shards", type=int, default=1,
+                    help="split items across N processes (launch one per GPU)")
     gn.add_argument("--cos_threshold", type=float, default=0.5)
     gn.add_argument("--encoder_dtype", default="fp32", choices=["fp32", "fp16"])
     gn.add_argument("--clip_id", default=DEFAULT_CLIP_ID)

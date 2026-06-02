@@ -82,6 +82,13 @@ candidate image changes** — isolating the image attack.
 
 ## 4. If you've already run the full pipeline & fine-tuned the model (the common case)
 
+**First, validate paths** (auto-detects covers / test_pairs / titles / popularity
+pairs / the clean preference CSV / your LoRA, and prints the exact commands):
+
+```bash
+python preflight_illusion.py --root /home/chenkuiyun/MLLM-attack
+```
+
 You do **not** re-run training or regenerate user preferences. Only two new
 things happen, and both are the "final-stage" only:
 
@@ -219,11 +226,19 @@ and the model weights, so they run on the cluster, not here.
 * **PNG, not JPEG.** Adversarial covers are saved losslessly (PNG); JPEG is a
   known partial defense (paper §6.1). The attack can be made JPEG-robust by
   optimizing through a differentiable JPEG, which is out of scope here.
-* **LLaVA-Next any-res preprocessing.** The illusion is optimized at the CLIP
-  336×336 input. LLaVA-Next then re-tiles/normalizes the saved image, which can
-  attenuate transfer from the pure CLIP embedding to LLaVA's `P(Yes)`. If the
-  recommendation-level ASR is weaker than the embedding-level ASR, raise `ε`
-  (e.g. 32/255) or `--iters`, or optimize through the LLaVA processor.
+* **LLaVA-Next any-res preprocessing.** This checkout's LLaVA config has
+  `image_grid_pinpoints = [[336,672],[672,336],[672,672],[1008,336],[336,1008]]`,
+  i.e. covers are re-tiled/up-sampled into several 336×336 CLIP tiles. The
+  illusion is optimized at the base 336×336 input, so high-frequency perturbation
+  can be partly attenuated when LLaVA up-samples to 672/1008 tiles. Embedding-level
+  ASR (pure CLIP) will be near-perfect; if the recommendation-level ASR (through
+  LLaVA) lags, raise `ε` (e.g. 32/255) or `--iters`, or optimize through the
+  LlavaNext image processor + vision tower on all tiles (a natural follow-up).
+* **Run in the right env.** The GPU stages need your MLLM conda env
+  (`torch`, `transformers`, `peft`, `datasets`; `sklearn` only for AUC). The
+  vision tower was confirmed to be `clip-vit-large-patch14-336` (336px, patch 14,
+  24 layers, hidden 1024), which is exactly the encoder `illusion_attack.py`
+  attacks.
 * **Stronger variant.** This implements the paper's encoder-space attack
   (image embedding ↔ popular text). An end-to-end variant that backprops the
   `Yes`-token logit through LLaVA directly would likely raise the
