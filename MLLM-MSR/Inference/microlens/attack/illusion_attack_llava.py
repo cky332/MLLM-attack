@@ -276,9 +276,16 @@ def generate(args):
         if not ok:
             continue
         x01 = torch.tensor(np.stack(arrs), device=args.device)
-        # per-source target grid index (stable, varied across the popular set)
-        tidx = torch.tensor(rng.integers(0, K, size=len(ok)), device=args.device)
-        tgrids = grids[tidx]                              # (B, T, D)
+        # target grid: per-source random cover (impersonate), or the per-position
+        # AVERAGED popular grid (token_centroid / centroid use a single shared grid).
+        if args.target_mode == "impersonate":
+            tidx = torch.tensor(rng.integers(0, K, size=len(ok)), device=args.device)
+            tgrids = grids[tidx]                              # (B, T, D)
+            tlabels = [tgt["items"][int(i)] for i in tidx.tolist()]
+        else:  # token_centroid (per-token cos to avg grid) or centroid (pooled cos)
+            tgrids = grids.mean(0, keepdim=True).expand(len(ok), -1, -1).contiguous()
+            lbl = f"avg_top{K}" if args.target_mode == "token_centroid" else "pooled_centroid"
+            tlabels = [lbl] * len(ok)
 
         with torch.no_grad():
             if args.target_mode == "centroid":
@@ -301,7 +308,7 @@ def generate(args):
             linf = float(np.max(np.abs(x_adv_np[j] - x01_np[j])))
             rows.append({"item_id": it, "cos_clean": float(cos_clean[j]),
                          "cos_adv": float(cos_adv[j]), "linf_255": linf * 255.0,
-                         "target_item": tgt["items"][int(tidx[j].item())]})
+                         "target_item": tlabels[j]})
         done = b + len(chunk)
         if (done // max(args.batch_size, 1)) % 10 == 0 or done >= len(items):
             mc = np.mean([r["cos_clean"] for r in rows]); ma = np.mean([r["cos_adv"] for r in rows])
@@ -355,7 +362,10 @@ def main():
     gn.add_argument("--target", required=True)
     gn.add_argument("--items_csv", default=None)
     gn.add_argument("--target_mode", default="impersonate",
-                    choices=["impersonate", "centroid"])
+                    choices=["impersonate", "centroid", "token_centroid"],
+                    help="impersonate=per-token cos to 1 random popular cover; "
+                         "token_centroid=per-token cos to the per-position AVG popular grid "
+                         "(discriminative centroid); centroid=pooled cos to centroid (degenerate)")
     gn.add_argument("--max_items", type=int, default=0)
     gn.add_argument("--eps", type=float, default=16.0)
     gn.add_argument("--alpha", type=float, default=1.0)
