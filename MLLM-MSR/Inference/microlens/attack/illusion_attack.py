@@ -145,6 +145,23 @@ class CLIPIllusionEncoder:
                 embs.append(f.float().cpu())
         return torch.cat(embs, dim=0).numpy()
 
+    def encode_image_paths(self, paths, size=None, batch_size=32):
+        """Encode image FILE PATHS -> (N, D) L2-normalised CLIP image embeddings.
+
+        Used to build an image<->image target (align to popular COVERS instead of
+        popular TITLES). Output lives in the same shared CLIP space as
+        encode_text, so the downstream PGD/eval are byte-for-byte identical.
+        """
+        torch = self.torch
+        size = size or self.input_size
+        embs = []
+        with torch.no_grad():
+            for i in range(0, len(paths), batch_size):
+                arrs = [load_image_as_01(p, size) for p in paths[i : i + batch_size]]
+                x = torch.tensor(np.stack(arrs), device=self.device)
+                embs.append(self.encode_image_01(x).float().cpu())
+        return torch.cat(embs, dim=0).numpy()
+
 
 # ---------------------------------------------------------------------------
 # Image IO
@@ -262,13 +279,37 @@ def load_titles(title_csv):
 
 
 def build_target(args):
-    """Build and save the popular-text target embedding (npz)."""
-    enc = CLIPIllusionEncoder(args.clip_id, device=args.device, dtype="fp32")
+    """Build and save the popular target embedding (npz).
 
-    if args.target_text:
+    --target_kind text  : align to CLIP TEXT embeddings of popular TITLES (default, v1).
+    --target_kind image : align to CLIP IMAGE embeddings of popular COVERS (image<->image).
+    Both live in the same shared CLIP space, so `generate`/`pgd_illusion` are identical.
+    """
+    enc = CLIPIllusionEncoder(args.clip_id, device=args.device, dtype="fp32")
+    counts = titles = None
+
+    if args.target_kind == "image":
+        if not args.src_dir:
+            raise SystemExit("--target_kind image requires --src_dir (popular covers dir)")
+        path_by_item = {}
+        for p in Path(args.src_dir).glob("*"):
+            if p.is_file() and p.suffix.lower() in IMG_EXTS:
+                path_by_item.setdefault(p.stem, str(p))
+        counts = load_item_popularity(args.pairs_csv)
+        titles = load_titles(args.title_csv) if args.title_csv else {}
+        ranked = sorted(counts.keys(), key=lambda k: -counts[k])
+        top_items = [it for it in ranked if it in path_by_item][: args.top_n]
+        if not top_items:
+            raise SystemExit("No popular covers found — check --src_dir/--pairs_csv")
+        embs = enc.encode_image_paths([path_by_item[it] for it in top_items])  # (T,D)
+        texts = [titles.get(it, "") for it in top_items]  # for logging only
+        source = "popularity_image"
+    elif args.target_text:
         texts = [t.strip() for t in args.target_text.split("||") if t.strip()]
-        source = "custom"
-        top_items = []
+        if not texts:
+            raise SystemExit("No target texts — check --target_text")
+        embs = enc.encode_text(texts)
+        top_items, source = [], "custom_text"
     else:
         counts = load_item_popularity(args.pairs_csv)
         titles = load_titles(args.title_csv)
@@ -277,12 +318,11 @@ def build_target(args):
         texts = [titles[it] for it in top_items]
         if args.popular_prefix:
             texts = [f"{args.popular_prefix} {t}" for t in texts]
-        source = "popularity"
+        if not texts:
+            raise SystemExit("No target texts — check --pairs_csv/--title_csv")
+        embs = enc.encode_text(texts)
+        source = "popularity_text"
 
-    if not texts:
-        raise SystemExit("No target texts — check --pairs_csv/--title_csv/--target_text")
-
-    embs = enc.encode_text(texts)                     # (T, D), normalised
     centroid = embs.mean(axis=0)
     centroid = centroid / (np.linalg.norm(centroid) + 1e-12)
 
@@ -297,9 +337,14 @@ def build_target(args):
         clip_id=args.clip_id,
         source=source,
     )
-    print(f"[build_target] source={source}  n_texts={len(texts)}  dim={centroid.shape[0]}")
-    for t in texts[: min(5, len(texts))]:
-        print(f"    target text: {t[:90]}")
+    print(f"[build_target] kind={args.target_kind} source={source}  "
+          f"n={len(embs)}  dim={centroid.shape[0]}")
+    if args.target_kind == "image":
+        for it in top_items[:5]:
+            print(f"    popular cover item {it} (count={counts.get(it)}): {titles.get(it, '')[:60]}")
+    else:
+        for t in texts[: min(5, len(texts))]:
+            print(f"    target text: {t[:90]}")
     print(f"[build_target] Saved target -> {out}")
 
 
@@ -461,7 +506,11 @@ def main():
     bt = sub.add_parser("build_target", help="Build popular-text target embedding")
     bt.add_argument("--pairs_csv", help="interaction pairs (.csv user,item,ts | .tsv)")
     bt.add_argument("--title_csv", help="item titles csv")
-    bt.add_argument("--top_n", type=int, default=20, help="# most-popular titles to use")
+    bt.add_argument("--top_n", type=int, default=20, help="# most-popular titles/covers to use")
+    bt.add_argument("--target_kind", default="text", choices=["text", "image"],
+                    help="align to popular TITLE text (default, v1) or popular COVER images")
+    bt.add_argument("--src_dir", default=None,
+                    help="popular covers dir (required when --target_kind image)")
     bt.add_argument("--popular_prefix", default="",
                     help="optional phrase prepended to each title, e.g. "
                          "'A trending viral popular video:'")
