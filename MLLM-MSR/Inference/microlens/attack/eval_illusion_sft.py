@@ -210,6 +210,11 @@ def evaluate(args):
     v_is_atk = is_atk[v]
     flip = decision_flip_asr(pyes_clean[v_is_atk], pyes_adv[v_is_atk],
                              threshold=args.decision_threshold, direction="promote")
+    # Backfire / collateral check: of attacked pairs the clean model said YES to,
+    # how many did our (promotion) attack accidentally flip to NO?  A clean attack
+    # should keep this low.  Its "asr" field = Yes->No rate among clean-Yes pairs.
+    backfire = decision_flip_asr(pyes_clean[v_is_atk], pyes_adv[v_is_atk],
+                                 threshold=args.decision_threshold, direction="demote")
 
     report = {
         "attack_name": args.attack_name,
@@ -222,6 +227,7 @@ def evaluate(args):
         "n_pairs_attacked": int(v_is_atk.sum()),
         "decision_threshold": args.decision_threshold,
         "decision_flip_asr": flip,
+        "backfire_yes_to_no": backfire,
     }
 
     K_per = args.candidates_per_user
@@ -264,6 +270,10 @@ def evaluate(args):
     print(f"  DECISION-FLIP ASR: {f['asr']:.1%}   "
           f"P(Yes) {f['mean_pyes_clean']:.4f} -> {f['mean_pyes_attacked']:.4f} "
           f"(lift {f['mean_pyes_lift']:+.4f})")
+    bf = report["backfire_yes_to_no"]
+    print(f"  BACKFIRE (Yes->No): {bf['asr']:.1%}  "
+          f"({bf['n_flipped']}/{bf['n_flippable']} clean-Yes pairs demoted)   "
+          f"P(Yes) up on {f['pct_pyes_increased']:.1%} of attacked pairs")
     if isinstance(report.get("metrics_clean"), dict):
         mc, ma = report["metrics_clean"], report["metrics_attacked"]
         print(f"\n{'metric':<12}{'clean':>10}{'attacked':>12}{'delta':>10}")
