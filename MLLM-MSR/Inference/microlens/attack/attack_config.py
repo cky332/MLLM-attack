@@ -138,6 +138,18 @@ TEXT_STYLES = {
         "stroke_width": 0,
         "stroke_fill": None,
     },
+    # IPI "global region-averaged coloring": FULL opacity, colour = mean RGB of the
+    # text region + brightness offset -> blends into background (stealth) yet stays
+    # machine-readable. IPI's best stealth/effectiveness trade-off.
+    "bg_avg": {
+        "font_size_ratio": 0.05,
+        "color": (200, 200, 200),   # fallback only; overridden by region mean
+        "opacity": 255,
+        "stroke_width": 0,
+        "stroke_fill": None,
+        "bg_averaged": True,
+        "brightness_offset": 20,
+    },
 }
 
 # Pre-defined attack experiment configs
@@ -236,6 +248,11 @@ ATTACK_CONFIGS = {
         "text_key": "ipi_yes_en",
         "position": "center",
         "style": "stealth_mid",      # 隐蔽(低透明)
+    },
+    "ipi_yes_en_bgavg": {
+        "text_key": "ipi_yes_en",
+        "position": "center",
+        "style": "bg_avg",           # IPI 杀手锏：背景自适应着色(融背景但满不透明)
     },
 }
 

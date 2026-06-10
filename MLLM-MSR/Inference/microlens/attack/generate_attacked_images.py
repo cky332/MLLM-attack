@@ -118,8 +118,21 @@ def overlay_text(image, text, position_name, style_config):
     pos_func = TEXT_POSITIONS.get(position_name, TEXT_POSITIONS["center"])
     x, y = pos_func(img_w, img_h, txt_w, txt_h)
 
-    # Draw text with opacity
-    fill_color = (*style_config["color"], style_config["opacity"])
+    # Draw text with opacity. For bg_averaged styles (IPI "global region-averaged
+    # coloring"): full opacity, but colour = mean RGB of the text region + a small
+    # brightness offset, so the text blends into the background (stealth) yet stays
+    # readable by the vision encoder.
+    if style_config.get("bg_averaged"):
+        import numpy as np
+        arr = np.asarray(base.convert("RGB"), dtype=np.float32)
+        x0, y0 = max(0, x), max(0, y)
+        x1, y1 = min(img_w, x + txt_w), min(img_h, y + txt_h)
+        region = (arr[y0:y1, x0:x1] if (x1 > x0 and y1 > y0) else arr).reshape(-1, 3).mean(0)
+        off = style_config.get("brightness_offset", 20)
+        color = tuple(int(np.clip(region[c] + off, 0, 255)) for c in range(3))
+    else:
+        color = style_config["color"]
+    fill_color = (*color, style_config["opacity"])
 
     draw_kwargs = {
         "xy": (x, y),
