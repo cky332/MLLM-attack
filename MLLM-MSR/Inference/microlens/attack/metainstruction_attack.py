@@ -201,15 +201,18 @@ class MetaInstructionModel:
         for it in range(iters):
             if delta.grad is not None:
                 delta.grad.zero_()
-            x_adv = torch.clamp(x0 + delta, 0, 1)
             pys = []
             for le, re in prompt_embs:
+                # Recompute x_adv per prompt so each has its OWN graph; backward()
+                # then frees only that graph and grads accumulate into delta.grad.
+                # (Sharing one x_adv across prompts -> "backward a second time".)
+                x_adv = torch.clamp(x0 + delta, 0, 1)
                 ly, ln = self._yesno(x_adv, le, re)
                 loss = torch.nn.functional.softplus(ln - ly)  # -log P(Yes), 2-way
-                if reg > 0:
-                    loss = loss + reg * delta.float().pow(2).mean()
                 loss.backward()
                 pys.append(torch.sigmoid(ly - ln).item())
+            if reg > 0:  # L2 stealth penalty: one extra backward, accumulates into grad
+                (reg * delta.float().pow(2).mean()).backward()
             mp = float(np.mean(pys))
             if mp > best["pyes"]:
                 best = {"pyes": mp, "delta": delta.detach().clone()}
